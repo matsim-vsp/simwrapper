@@ -5,7 +5,7 @@ import pluginRewriteAll from 'vite-plugin-rewrite-all'
 
 export default defineConfig({
   base: '/',
-  build: { sourcemap: true },
+  build: { sourcemap: false },
   plugins: [
     // vue
     createVuePlugin({ include: [/\.vue$/, /\.md$/] }),
