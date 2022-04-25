@@ -66,7 +66,7 @@ export interface CSV {
 
 export type VizLayerConfiguration = {
   datasets: { [id: string]: string }
-  display: { color: any; width: any }
+  display: { color: any; width: any; fill: any }
 }
 
 export type YamlConfigs = {
@@ -124,6 +124,11 @@ export enum ColorScheme {
 export interface BreadCrumb {
   label: string
   url?: string
+}
+
+export interface Warnings {
+  msg: string
+  desc?: string
 }
 
 export interface ColorSet {

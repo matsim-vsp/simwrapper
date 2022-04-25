@@ -1,6 +1,6 @@
 {
   "name": "simwrapper",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "private": true,
   "license": "GPL-3.0-or-later",
   "author": "Billy Charlton <charlton@tu-berlin.de>",
@@ -73,6 +73,7 @@
     "react-map-gl": "^6.1.17",
     "read-blob": "^1.1.0",
     "reproject": "^1.2.6",
+    "sanitize-filename": "^1.6.3",
     "shallow-equal": "^1.2.1",
     "shapefile": "^0.6.6",
     "shp-write": "^0.3.2",

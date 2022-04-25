@@ -6,7 +6,7 @@
     router-view.main-content
     p(style="text-justify: center; margin: auto auto; font-size: 2rem;"): i • S i m W r a p p e r •
 
-  .message-zone(v-if="state.statusErrors.length")
+  //.message-zone(v-if="state.statusErrors.length")
     .message-error(v-for="err,i in state.statusErrors")
       p: i.fa.fa-icon.fa-exclamation-triangle(style="color: orange;")
       p(v-html="err")
@@ -502,8 +502,8 @@ a:hover {
 // MapLibre Logo
 .mapboxgl-ctrl-bottom-left {
   filter: var(--logoOpacity);
-  bottom: 1.5em;
-  right: 0.8rem;
+  bottom: 1.25em;
+  right: 0.25rem;
   left: unset;
   z-index: 0;
 }
@@ -511,8 +511,8 @@ a:hover {
 // Mapbox Improve this Map attribution
 .mapboxgl-ctrl-bottom-right {
   filter: var(--logoOpacity);
-  right: 0.5rem;
-  bottom: 0.5rem;
+  right: 0rem;
+  bottom: 0rem;
   left: unset;
   z-index: 0;
 }
