@@ -54,12 +54,19 @@ const fileSystems: FileSystemConfig[] = [
     skipList: ['episim/battery'],
   },
   {
+    name: 'RealLabHH',
+    slug: 'reallabhh',
+    description: 'digital mobility of tomorrow is being tested in a metropolis here and now',
+    description_de: 'Digitale Mobilität von morgen im Hier und Jetzt in einer Metropole',
+    baseURL: 'https://svn.vsp.tu-berlin.de/repos/public-svn/matsim/scenarios/countries/de/hamburg/hamburg-v2/hamburg-v2.2/viz',
+    thumbnail: '/simwrapper/images/thumb-localfiles.jpg',
+  },
+  {
     name: 'Sample Runs',
     slug: 'sample-runs',
     description: 'Pre-built dashboards for exploration',
     thumbnail: 'images/thumb-localfiles.jpg',
     baseURL: 'https://svn.vsp.tu-berlin.de/repos/public-svn/shared/billy/simwrapper/sample-data',
-    hidden: true,
   },
   {
     name: 'KoMoDnext',
