@@ -135,6 +135,7 @@ function buildTransitRouteDetails(lineId: string, route: any): RouteDetails {
       routeDetails.routeProfile.push(stop)
     }
   } else {
+    console.warn('Route only has one stop: ', route)
     routeDetails.routeProfile.push(route.routeProfile.stop)
   }
 
