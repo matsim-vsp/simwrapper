@@ -2,6 +2,59 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [3.4.2](https://github.com/simwrapper/simwrapper/compare/v3.4.1...v3.4.2) (2024-10-15)
+
+
+### Bug Fixes
+
+* Dataset manager - handle Firefox hangs when CSV too large for memory ([80f8f3f](https://github.com/simwrapper/simwrapper/commit/80f8f3fed63ec9e899a8fe70921430566073a23c))
+* GridMap doesn't load if projection isn't specified in YAML ([9636e34](https://github.com/simwrapper/simwrapper/commit/9636e34b15e0610013fb4d0be5050bbbf14c4835))
+* if no customRouteType is defined ([675701e](https://github.com/simwrapper/simwrapper/commit/675701ec79b12233c7e77d412ff140f6ad4a5053))
+* Matrix viewer displays a loading spinner while data is loading ([22503aa](https://github.com/simwrapper/simwrapper/commit/22503aa6a4c9a1127a41cef36e6641546655ff42)), closes [#391](https://github.com/simwrapper/simwrapper/issues/391)
+* Sankey chart font size is sometimes too small ([87baad5](https://github.com/simwrapper/simwrapper/commit/87baad5665cdb961feb01e429e95495da337ed98)), closes [#309](https://github.com/simwrapper/simwrapper/issues/309)
+* Shapefile background layers were not showing dots/circles ([1c3af1c](https://github.com/simwrapper/simwrapper/commit/1c3af1c4e32aa33080536b7cf79e115995789c64)), closes [#198](https://github.com/simwrapper/simwrapper/issues/198)
+* Shapefile info panel moved to right, so tooltips no longer flicker ([2870f0d](https://github.com/simwrapper/simwrapper/commit/2870f0dab8f379d84227350a530411405f4d593f)), closes [#384](https://github.com/simwrapper/simwrapper/issues/384)
+* XML network loader failed on very small networks ([ccfb045](https://github.com/simwrapper/simwrapper/commit/ccfb045706277c865c2cfab8ff69d203da91fb60))
+
+### [3.4.1](https://github.com/simwrapper/simwrapper/compare/v3.4.0...v3.4.1) (2024-08-13)
+
+
+### Bug Fixes
+
+* Add build commit/tag info to splash page ([f5c4e04](https://github.com/simwrapper/simwrapper/commit/f5c4e04a6b1a7b0fbdcc4e5033bb43b874634e04)), closes [#360](https://github.com/simwrapper/simwrapper/issues/360)
+* Add proper scrollbar for map view configurators ([bdd1d47](https://github.com/simwrapper/simwrapper/commit/bdd1d4789f7eec05b83887e98b69b6d3de453216))
+* Favorite folder star went missing ([8a4b17d](https://github.com/simwrapper/simwrapper/commit/8a4b17d6e47f3c9bad78dcbf8787f7fc4bc8d3b0))
+
+## [3.4.0](https://github.com/simwrapper/simwrapper/compare/v3.3.0...v3.4.0) (2024-08-08)
+
+
+### Features
+
+* Plotly bar/line/area/pie/scatter plots learned stable "category" colors ([7eb1933](https://github.com/simwrapper/simwrapper/commit/7eb1933d3ab373a714cd5b63e5555dee99321522))
+* Shapefile "On top": layers can now be above or below main dataset ([d94a775](https://github.com/simwrapper/simwrapper/commit/d94a775fafc58b6c8d08ae4a4076da59d6f28485)), closes [#380](https://github.com/simwrapper/simwrapper/issues/380)
+* Support TeX math equations in Markdown panels ([2f26513](https://github.com/simwrapper/simwrapper/commit/2f26513082d15b9aae55a34c6c6e71bdf453ddcb))
+
+
+### Bug Fixes
+
+* Redraw Shapefile layers when extra layers are reloaded ([2eb5cdd](https://github.com/simwrapper/simwrapper/commit/2eb5cddf7a1816377ef94769bb13c03ae081425d)), closes [#379](https://github.com/simwrapper/simwrapper/issues/379)
+* Shapefile background layers show/hide slowly ([6ece149](https://github.com/simwrapper/simwrapper/commit/6ece14984a20003975ad8e5305eb6077daffd3b9)), closes [#379](https://github.com/simwrapper/simwrapper/issues/379)
+* Shapefile click-to-lock tooltip ([8e6d160](https://github.com/simwrapper/simwrapper/commit/8e6d160bf54a5c3b9232da1d4ebd133e20bebaf3)), closes [#372](https://github.com/simwrapper/simwrapper/issues/372)
+* Shapefile should load even if DBF file is missing. ([9bac1e3](https://github.com/simwrapper/simwrapper/commit/9bac1e31f22798d44b5af28170ebb1db72abac8b))
+* Shapefile viewer should be able to open MATSim networks ([745c37e](https://github.com/simwrapper/simwrapper/commit/745c37e3722be4a46559438147dbf7fd39617d6d))
+
+## [3.3.0](https://github.com/simwrapper/simwrapper/compare/v3.2.0...v3.3.0) (2024-07-11)
+
+
+### Features
+
+* Background layers for shapefile/geojson maps ([9efe6d4](https://github.com/simwrapper/simwrapper/commit/9efe6d42253cde09d87bdd9b962d07853da60d36))
+
+
+### Bug Fixes
+
+* tile panel icons not always appearing ([a229cb5](https://github.com/simwrapper/simwrapper/commit/a229cb595064b17d8ed49012eb7e4e0e8d0886a9)), closes [#274](https://github.com/simwrapper/simwrapper/issues/274) [#370](https://github.com/simwrapper/simwrapper/issues/370)
+
 ## [3.2.0](https://github.com/simwrapper/simwrapper/compare/v3.1.2...v3.2.0) (2024-06-25)
 
 

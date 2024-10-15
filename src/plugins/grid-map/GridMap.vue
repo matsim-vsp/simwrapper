@@ -31,7 +31,7 @@ import GUI from 'lil-gui'
 import { ToggleButton } from 'vue-js-toggle-button'
 import YAML from 'yaml'
 import colormap from 'colormap'
-import { hexToRgb, getColorRampHexCodes, Ramp, Style } from '@/js/ColorsAndWidths'
+import { hexToRgb, getColorRampHexCodes, Ramp } from '@/js/ColorsAndWidths'
 
 import util from '@/js/util'
 import globalStore from '@/store'
@@ -46,7 +46,6 @@ import TimeSlider from '@/components/TimeSliderV2.vue'
 
 import GridLayer from './GridLayer'
 import { ColorScheme, FileSystemConfig, Status } from '@/Globals'
-import { thresholdFreedmanDiaconis } from 'd3-array'
 import avro from '@/js/avro'
 
 // interface for each time object inside the mapData Array
@@ -64,6 +63,7 @@ export interface MapData {
 export interface CompleteMapData {
   mapData: MapData[]
   scaledFactor: Number
+  unit: String
 }
 
 interface VizDetail {
@@ -83,6 +83,7 @@ interface VizDetail {
   mapIsIndependent?: boolean
   breakpoints?: string
   valueColumn: string
+  unit: string
 }
 
 interface GuiConfig {
@@ -210,6 +211,7 @@ const GridMap = defineComponent({
         zoom: 9,
         breakpoints: null as any,
         valueColumn: 'value',
+        unit: '',
       } as VizDetail,
       myState: {
         statusMessage: '',
@@ -382,7 +384,7 @@ const GridMap = defineComponent({
     async getVizDetails() {
       if (this.config) {
         this.validateYAML()
-        this.vizDetails = Object.assign({}, this.config) as VizDetail
+        this.vizDetails = Object.assign({ colorRamp: '' }, this.config) as VizDetail
         this.setRadiusAndHeight()
         this.setCustomGuiConfig()
         return
@@ -398,7 +400,7 @@ const GridMap = defineComponent({
     },
 
     loadOutputTripsConfig() {
-      let projection = 'EPSG:31468' // 'EPSG:25832', // 'EPSG:31468', // TODO: fix
+      let projection = '' // 'EPSG:31468' // 'EPSG:25832', // 'EPSG:31468', // TODO: fix
       if (!this.myState.thumbnail) {
         projection = prompt('Enter projection: e.g. "EPSG:31468"') || 'EPSG:31468'
         if (!!parseInt(projection, 10)) projection = 'EPSG:' + projection
@@ -416,6 +418,7 @@ const GridMap = defineComponent({
         center: this.vizDetails.center,
         zoom: this.vizDetails.zoom,
         valueColumn: this.vizDetails.valueColumn,
+        unit: this.vizDetails.unit,
       }
       this.$emit('title', this.vizDetails.title)
       this.solveProjection()
@@ -610,9 +613,14 @@ const GridMap = defineComponent({
 
       // console.log({ scaleFactor })
 
+      if (this.vizDetails.unit == undefined) {
+        this.vizDetails.unit = ''
+      }
+
       const finalData = {
         mapData: [] as MapData[],
         scaledFactor: scaleFactor as Number,
+        unit: this.vizDetails.unit,
       } as CompleteMapData
 
       const x = record.xCoords
@@ -676,21 +684,37 @@ const GridMap = defineComponent({
 
     async loadAndPrepareCSVData() {
       const config = { dataset: this.vizDetails.file }
-      const csv = await this.myDataManager.getDataset(config)
+      let csv = {} as any
+      try {
+        csv = await this.myDataManager.getDataset(config)
+      } catch (e) {
+        this.$emit('error', '' + e) // `Error loading ${this.vizDetails.file}: File missing? CSV Too large?`)
+      }
 
       // The datamanager doesn't return the comments...
-      // const projection = csv.comments[0].split('#')[1].trim()
-      // if (projection) this.vizDetails.projection = projection
+      if (csv.comments && csv.comments.length) {
+        csv.comments.forEach((comment: string) => {
+          if (comment.indexOf('EPSG') > -1) {
+            const projection = comment.substring(comment.lastIndexOf('EPSG')).trim()
+            if (projection) this.vizDetails.projection = projection
+          }
+        })
+      }
 
       // Store the min and max value to calculate the scale factor
       let minValue = Number.POSITIVE_INFINITY
       let maxValue = Number.NEGATIVE_INFINITY
 
-      console.log('csv: ', csv.allRows)
-      console.log('valueColumn: ', this.vizDetails.valueColumn)
+      // console.log('csv: ', csv.allRows)
+      // console.log('valueColumn: ', this.vizDetails.valueColumn)
+      // console.log('csv:', { csv })
 
       if (this.vizDetails.valueColumn == undefined) {
         this.vizDetails.valueColumn = 'value'
+      }
+
+      if (this.vizDetails.unit == undefined) {
+        this.vizDetails.unit = ''
       }
 
       // This for loop collects all the data that's used by
@@ -726,6 +750,7 @@ const GridMap = defineComponent({
       const finalData = {
         mapData: [] as MapData[],
         scaledFactor: scaleFactor as Number,
+        unit: this.vizDetails.unit,
       } as CompleteMapData
 
       // map all times to their index and create a mapData object for each time
@@ -837,18 +862,23 @@ const GridMap = defineComponent({
       config.add(this.guiConfig, 'height', 0, 250, 5)
 
       // Remove color ramp selector if the colorRamp is fixed
-      if (
-        this.vizDetails.colorRamp.breakpoints &&
-        this.vizDetails.colorRamp.breakpoints.length ==
-          this.vizDetails.colorRamp.fixedColors.length - 1
-      ) {
+      if (this.vizDetails.colorRamp) {
+        // let's make sure details user provided make sense
+        if (
+          this.vizDetails.colorRamp.breakpoints &&
+          this.vizDetails.colorRamp.fixedColors &&
+          this.vizDetails.colorRamp.breakpoints.length !==
+            this.vizDetails.colorRamp.fixedColors.length - 1
+        ) {
+          this.$emit('error', 'Color ramp breakpoints and fixedColors do not have correct lengths')
+        }
         return
       }
 
       const colors = config.addFolder('colors')
       colors.add(this.guiConfig, 'color ramp', this.guiConfig.colorRamps).onChange(this.setColors)
       colors.add(this.guiConfig, 'flip').onChange(this.setColors)
-      // colors.add(this.guiConfig, 'steps').onChange(this.setColors)
+      this.setColors()
     },
 
     setColors() {
@@ -971,6 +1001,8 @@ const GridMap = defineComponent({
     // MUST erase the React view handle to prevent gigantic memory leak!
     REACT_VIEW_HANDLES[this.id] = undefined
     delete REACT_VIEW_HANDLES[this.id]
+
+    this.data = null
 
     this.$store.commit('setFullScreen', false)
   },

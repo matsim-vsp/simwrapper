@@ -16,6 +16,7 @@ let _config: any = {}
 let _dataset = ''
 let _buffer: Uint8Array
 let _highPrecision = false
+let _comments = [] as any
 
 const _fileData: { [key: string]: DataTable } = {}
 
@@ -72,6 +73,8 @@ async function fetchData(props: {
 
     // load all files
     await loadFile()
+    // add extra "_comments" column
+    if (_comments.length) _fileData[_dataset]._comments = _comments
     postMessage(_fileData[_dataset])
   } catch (e) {
     const error = '' + e
@@ -219,6 +222,11 @@ function parseCsvFile(fileKey: string, filename: string, text: string) {
     },
   })
 
+  if (!csv.data?.length) {
+    console.error('NODATA - Papaparse returned nothing!')
+    throw Error('Failed loading CSV file. Perhaps too large? Bad format?')
+  }
+
   let headers = csv.meta.fields || []
 
   if (_config.drop) {
@@ -280,8 +288,13 @@ function parseCsvFile(fileKey: string, filename: string, text: string) {
       }
     }
   }
+
   calculateMaxValues(fileKey, dataTable)
   _fileData[fileKey] = dataTable
+
+  // store comments, too
+  _comments = [...new Set(csv.comments)]
+  if (_comments.length) console.log({ _comments })
 }
 
 function calculateMaxValues(fileKey: string, dataTable: DataTable) {

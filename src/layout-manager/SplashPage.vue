@@ -18,23 +18,10 @@
     .diagonal.data-area
       .content
 
-        h2.section-head Explore Data Sources
-        p
-          | Configure more data sources from the&nbsp;
-          a(@click="openDataStrip()") data
-          | &nbsp;tab on the left-side strip.
-
-        .roots
-          .project-root(v-for="project in mainRoots" :key="project.slug"
-            @click="clickedOnFolder({root: project.slug})"
-          )
-            h5 {{ project.name }}
-            p {{ project.description }}
-
         .section-head.is-chrome(v-if="isChrome")
           h2 Local Folders
 
-          p(v-if="!localFileHandles.length") This Chromium-based browser can access local folders that you authorize on a per-folder basis. To explore files on your local filesystem right now:
+          p(v-if="!localFileHandles.length") You can securely browse simulation outputs with this Chromium-based browser. Your data is <b>never uploaded to any server:</b> everything stays right here in your browser. To explore files on your local filesystem right now:
 
           .roots
             .project-root.local.mb1(v-for="row in localFileHandles" :key="row.key"
@@ -49,6 +36,19 @@
             @click="showChromeDirectory"
           ) Open local folder...
 
+
+        h2.section-head Data Sources
+        p
+          | Configure more data sources from the&nbsp;
+          a(@click="openDataStrip()") data
+          | &nbsp;tab on the left-side strip.
+
+        .roots
+          .project-root(v-for="project in mainRoots" :key="project.slug"
+            @click="clickedOnFolder({root: project.slug})"
+          )
+            h5 {{ project.name }}
+            p {{ project.description }}
 
     //- WHAT IS SIMWRAPPER  ------------------------------------------------------
 
@@ -146,6 +146,14 @@
         .flex-row
           .legal.flex1
             h4.section-head SimWrapper, © 2024 Technische Universität Berlin
+
+            h4(style="margin: 0") Build information:
+            p Version: &nbsp;
+              b {{  git.tag }}
+            p Built from commit: &nbsp;
+              b {{  git.commit }}
+            br
+
             p SimWrapper is open source and available on&nbsp;
               a(href="https://github.com/simwrapper/simwrapper") GitHub.
             p
@@ -191,6 +199,13 @@ import SIMWRAPPER_FULL_LOGO from '@/assets/simwrapper-logo/SW_logo_white.png'
 
 const BASE_URL = import.meta.env.BASE_URL
 
+const SIMWRAPPER_COMMIT = import.meta.env.VITE_COMMIT
+const SIMWRAPPER_TAG = import.meta.env.VITE_TAG
+const GIT = {
+  commit: SIMWRAPPER_COMMIT,
+  tag: SIMWRAPPER_TAG,
+}
+
 const logos = [
   { url: 'https://tu.berlin', image: 'tu-logo.png', name: 'TU Berlin' },
   { url: 'https://vsp.berlin/en/', image: 'vsp-logo-300dpi.png', name: 'VSP TU-Berlin' },
@@ -221,6 +236,7 @@ export default defineComponent({
         berlin: SCREENSHOT_BERLIN,
       },
       skimwrapper: `${BASE_URL}matrix`,
+      git: GIT,
     }
   },
   computed: {
@@ -328,7 +344,6 @@ export default defineComponent({
     },
 
     openDataStrip() {
-      this.$store.commit('setShowLeftStrip', true)
       this.$store.commit('setShowLeftBar', true)
     },
   },
@@ -340,6 +355,7 @@ export default defineComponent({
     }
 
     this.updateShortcuts()
+    this.$store.commit('setWindowTitle', '')
   },
 })
 </script>
@@ -347,7 +363,7 @@ export default defineComponent({
 <style scoped lang="scss">
 @import '@/styles.scss';
 
-$angle: 1.25deg;
+$angle: 1deg;
 
 .splash-page {
   position: absolute;
@@ -355,7 +371,7 @@ $angle: 1.25deg;
   bottom: 0;
   left: 0;
   right: 0;
-  background-image: linear-gradient(45deg, #0c8ed3, #8f00ff);
+  background-image: var(--bgSplashPage);
 }
 
 .centered {
@@ -390,7 +406,6 @@ $angle: 1.25deg;
 
 .sponsors-area {
   background-color: white;
-  // background-image: linear-gradient(45deg, #edf2fd, #f4effd, #ebf6fa);
   margin-bottom: 1rem;
   padding-bottom: 2rem;
   color: #333;
@@ -406,7 +421,6 @@ h4 {
 }
 
 .data-area {
-  // background-color: #222a35;
   background-image: linear-gradient(45deg, rgb(44, 39, 68), #1c242f, #283f42);
   padding-bottom: 2rem;
 }
@@ -600,7 +614,7 @@ h2.splash-readme {
 }
 
 .is-chrome {
-  margin-top: 2rem;
+  margin-top: 0rem;
 }
 
 .newbie-area {

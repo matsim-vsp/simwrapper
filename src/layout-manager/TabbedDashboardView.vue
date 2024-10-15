@@ -6,20 +6,21 @@
   .tabholder(v-if="isShowingBreadcrumbs && !isMultipanel && !isZoomed" :style="dashWidthCalculator")
     .tabholdercontainer.white-text
       .project-header(v-if="header" v-html="header")
-      .project-path(v-else)
-        .nav-title
-          p.title-text {{ finalFolder }}
-          p.favorite-icon(
-            @click="clickedFavorite"
-            title="Favorite"
-            :class="{'is-favorite': isFavorite}"
-          ): i.fa.fa-star
+
+      .project-path.flex-row(v-else)
+
         bread-crumbs.breadcrumbs(
             :root="root"
             :subfolder="xsubfolder"
             @navigate="onNavigate"
             @crumbs="updateCrumbs"
         )
+
+        p.favorite-icon(
+            @click="clickedFavorite"
+            title="Favorite"
+            :class="{'is-favorite': isFavorite}"
+          ): i.fa.fa-star
 
   .dashboard-finder(:class="{isMultipanel, isZoomed}")
     ul.dashboard-right-sections(v-show="!isZoomed && Object.keys(dashboards).length > 1")
@@ -64,7 +65,6 @@ import Vue, { defineComponent } from 'vue'
 
 import markdown from 'markdown-it'
 import micromatch from 'micromatch'
-import DOMPurify from 'dompurify'
 import YAML from 'yaml'
 
 import globalStore from '@/store'
@@ -155,6 +155,7 @@ export default defineComponent({
     isFavorite(): any {
       let key = this.root
       if (this.xsubfolder) key += `/${this.xsubfolder}`
+      if (key.endsWith('/')) key = key.substring(0, key.length - 1)
 
       const indexOfPathInFavorites = this.globalState.favoriteLocations.findIndex(
         f => key == f.fullPath
@@ -203,16 +204,18 @@ export default defineComponent({
       // remove current folder from subfolder
       hint = hint.substring(0, hint.lastIndexOf('/'))
 
+      let fullPath = `${this.root}/${this.xsubfolder}`
+      if (fullPath.endsWith('/')) fullPath = fullPath.substring(0, fullPath.length - 1)
+
       const favorite: FavoriteLocation = {
         root: this.root,
         subfolder: this.xsubfolder,
         label: this.finalFolder,
-        fullPath: `${this.root}/${this.xsubfolder}`,
+        fullPath,
         hint,
       }
 
       this.$store.commit(this.isFavorite ? 'removeFavorite' : 'addFavorite', favorite)
-      if (this.isFavorite) this.$store.commit('setShowLeftBar', true)
     },
 
     async getFolderReadme() {
@@ -252,6 +255,10 @@ export default defineComponent({
           }
         })
 
+        // headers, footers, etc
+        await this.setupProjectConfig()
+        await this.$nextTick()
+
         if (showDashboards) {
           for (const fullPath of Object.values(this.allConfigFiles.dashboards)) {
             // add the tab now
@@ -263,26 +270,24 @@ export default defineComponent({
           }
         }
 
-        // headers, footers, etc
-        await this.setupProjectConfig()
-
         // Add FileBrowser as "Files" tab
         if (this.globalState.isShowingFilesTab) {
           Vue.set(this.dashboards, 'FILE__BROWSER', { header: { tab: 'Files' } })
         }
 
         // // Start on correct tab
+        const dashboardKeys = Object.keys(this.dashboards)
         if (this.$route.query.tab) {
           try {
             const userSupplied = parseInt('' + this.$route.query.tab) - 1
-            const userTab = Object.keys(this.dashboards)[userSupplied]
-            this.activeTab = userTab || Object.keys(this.dashboards)[0]
+            const userTab = dashboardKeys[userSupplied]
+            this.activeTab = userTab || dashboardKeys[0]
           } catch (e) {
             // user spam; just use first tab
-            this.activeTab = Object.keys(this.dashboards)[0]
+            this.activeTab = dashboardKeys[0]
           }
         } else {
-          this.activeTab = Object.keys(this.dashboards)[0]
+          this.activeTab = dashboardKeys[0]
         }
         this.dashboardTabWithDelay = this.activeTab
       } catch (e) {
@@ -326,11 +331,6 @@ export default defineComponent({
           // always reveal quickview bar unless told not to
           if (yaml.hideLeftBar === true) {
             this.$store.commit('setShowLeftBar', false)
-            this.$store.commit('setShowLeftStrip', false)
-          }
-          if (yaml.hideLeftBar === false) {
-            this.$store.commit('setShowLeftBar', true)
-            this.$store.commit('setShowLeftStrip', true)
           }
 
           // theme
@@ -390,7 +390,6 @@ export default defineComponent({
 
             // User defined a leftNavBar: so make it visible
             this.$store.commit('setShowLeftBar', true)
-            this.$store.commit('setShowLeftStrip', false)
             this.$store.commit('setLeftNavItems', this.leftNavItems)
 
             this.$emit('activate', {
@@ -526,6 +525,9 @@ export default defineComponent({
 
     updateCrumbs(props: { crumbs: any[]; finalFolder: string }) {
       this.finalFolder = props.finalFolder || ''
+      if (this.finalFolder !== this.$store.state.windowTitle) {
+        this.$store.commit('setWindowTitle', this.finalFolder)
+      }
       this.crumbs = props.crumbs
     },
 
@@ -656,7 +658,7 @@ export default defineComponent({
 
 .tabholder {
   z-index: 50;
-  padding: 0.75rem 0rem 0.25rem 0rem;
+  padding: 0.5rem 0rem 0.5rem 0rem;
 }
 
 .tabholdercontainer {
@@ -677,8 +679,8 @@ li.is-not-active b a {
 .dashboard-finder {
   display: flex;
   flex: 1;
-  flex-direction: row-reverse;
-  padding: 0 $cardSpacing;
+  flex-direction: row;
+  padding: 0 0.5rem; // $cardSpacing;
   position: relative;
   overflow-y: auto;
 }
@@ -695,7 +697,7 @@ li.is-not-active b a {
 .dashboard-right-sections {
   display: flex;
   flex-direction: column;
-  padding: 1.5rem 0rem 2rem 0rem;
+  padding: 1.25rem 1.5rem 2rem 0.5rem;
 }
 
 .dashboard-content {
@@ -718,7 +720,7 @@ li.is-not-active b a {
   font-size: 0.9rem;
   line-height: 1.1rem;
   padding: 3px 0.5rem 5px 0.5rem;
-  border-right: 5px solid #00000000;
+  border-left: 5px solid #00000000;
   user-select: none;
   margin-bottom: 1px;
 
@@ -734,7 +736,7 @@ li.is-not-active b a {
 
 .tab-list.is-active {
   background-color: var(--bgBold);
-  border-right: 5px solid var(--highlightActiveSection);
+  border-left: 5px solid var(--highlightActiveSection);
   border-radius: 3px 0 0 3px;
   font-weight: bold;
   a {
@@ -862,20 +864,26 @@ li.is-not-active b a {
 }
 
 .favorite-icon {
-  margin: auto 0 auto 1rem;
-  opacity: 0.3;
+  margin: auto -0.5rem auto 1rem;
+  opacity: 0.6;
   font-size: 1.1rem;
+  color: #757bff;
+  // text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;
 }
 
 .is-favorite {
   opacity: 1;
+  color: #4f58ff;
+  text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;
 }
+
 .favorite-icon:hover {
   cursor: pointer;
 }
 
 .breadcrumbs {
-  padding: 0.25rem 0;
+  flex: 1;
+  padding: 0;
   font-size: 0.9rem;
   color: var(--text);
 }

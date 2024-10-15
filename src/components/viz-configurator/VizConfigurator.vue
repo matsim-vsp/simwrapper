@@ -44,14 +44,15 @@
             :is="section.component"
             :vizConfiguration="vizConfiguration"
             :datasets="datasets"
+            :subfolder="subfolder"
             @update="handleConfigChanged")
           p(v-else) To be added
 
-    .legend-area
-      legend-box.legend-panel(
-        v-show="showLegend"
-        :legendStore="legendStore"
-      )
+    //- .legend-area
+    //-   legend-box.legend-panel(
+    //-     v-show="showLegend"
+    //-     :legendStore="legendStore"
+    //-   )
 
   add-datasets-panel(v-if="showAddDatasets"
     :vizConfiguration="vizConfiguration"
@@ -79,6 +80,7 @@ import LineColorPanel from './LineColors.vue'
 import FillColorPanel from './FillColors.vue'
 import FillHeightPanel from './FillHeight.vue'
 import LineWidthPanel from './LineWidths.vue'
+import LayersPanel from './Layers.vue'
 import CircleRadiusPanel from './CircleRadius.vue'
 import FiltersPanel from './Filters.vue'
 import { FileSystemConfig } from '@/Globals'
@@ -96,6 +98,7 @@ export default defineComponent({
     LineColorPanel,
     LineWidthPanel,
     FiltersPanel,
+    LayersPanel,
   },
 
   props: {
@@ -113,7 +116,7 @@ export default defineComponent({
   data: () => {
     return {
       showPanels: false,
-      showLegend: false,
+      showLegend: true,
       activeSection: '',
       showAddDatasets: false,
       selectedExportAction: '',
@@ -145,6 +148,7 @@ export default defineComponent({
         datasets: this.vizDetails.datasets,
         display: this.vizDetails.display,
         filters: this.vizDetails.filters,
+        backgroundLayers: this.vizDetails.backgroundLayers || {},
       }
     },
 
@@ -174,6 +178,7 @@ export default defineComponent({
     },
 
     clickedLegendShowHide() {
+      this.$emit('toggleLegend')
       this.showLegend = !this.showLegend
     },
 
@@ -237,7 +242,15 @@ export default defineComponent({
         datasets: { ...this.vizDetails.datasets },
         display: { ...this.vizDetails.display },
         filters: {},
+        backgroundLayers: this.vizDetails.backgroundLayers || {},
       } as any
+
+      // remove bgLayer titles
+      for (const id of Object.keys(config.backgroundLayers)) {
+        const layer = config.backgroundLayers[id]
+        delete layer.title
+        if (layer.label === '') delete layer.label
+      }
 
       // define shapefile join column, if we have one
       if (typeof this.vizDetails.shapes === 'object' && this.vizDetails.shapes.join) {
@@ -426,18 +439,17 @@ h1:hover {
   user-select: none;
   border-radius: 3px;
   pointer-events: auto;
-  margin: 0 0.5rem 2rem 0;
+  margin: 0 0.5rem 0rem 0;
   filter: $filterShadow;
   z-index: 10;
 }
 
 .map-actions {
-  pointer-events: all;
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  margin-top: 72px;
-  margin-right: 0px;
+  margin: 72px 0px auto 0px;
+  pointer-events: auto;
   z-index: 5;
 }
 
@@ -515,6 +527,11 @@ h1:hover {
 .right-panels {
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 10;
+  pointer-events: all;
+  gap: 2rem;
 }
 
 @media only screen and (max-width: 640px) {

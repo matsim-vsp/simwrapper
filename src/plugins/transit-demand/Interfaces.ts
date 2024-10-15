@@ -8,6 +8,7 @@ export interface RouteDetails {
   route: string[]
   transportMode: string
   uniqueRouteID?: number
+  gtfsRouteType?: number
 }
 
 export interface Network {
@@ -18,6 +19,9 @@ export interface Network {
 export interface NetworkNode {
   x: number
   y: number
+  name?: string
+  id?: string
+  linkRefId?: string
 }
 
 export interface NetworkInputs {
@@ -33,4 +37,5 @@ export interface NetworkLink {
 export interface TransitLine {
   id: string
   transitRoutes: RouteDetails[]
+  gtfsRouteType: number
 }

@@ -15,7 +15,13 @@ const plugins = [
   },
   {
     kebabName: 'area-map',
-    filePatterns: ['**/viz-map*.y?(a)ml', '**/*.geojson?(.gz)', '**/*network.avro', '**/*.shp'],
+    filePatterns: [
+      '**/viz-map*.y?(a)ml',
+      '**/*.geojson?(.gz)',
+      '**/*network.avro',
+      '**/*network.xml?(.gz)',
+      '**/*.shp',
+    ],
     component: defineAsyncComponent(() => import('./shape-file/ShapeFile.vue')),
   },
   {
@@ -47,8 +53,9 @@ const plugins = [
     kebabName: 'links',
     component: defineAsyncComponent(() => import('./links-gl/NetworkLinks.vue')),
     filePatterns: [
-      '**/*network.xml?(.gz)',
-      '**/*network.geo?(.)json?(.gz)',
+      // deprecated! Use shapefile/map viewer instead
+      // '**/*network.xml?(.gz)',
+      // '**/*network.geo?(.)json?(.gz)',
       '**/viz-gl-link*.y?(a)ml',
       '**/viz-link*.y?(a)ml',
     ],
@@ -112,6 +119,11 @@ const plugins = [
     kebabName: 'xmas-kelheim',
     filePatterns: ['**/xmas-kelheim*.y?(a)ml'],
     component: defineAsyncComponent(() => import('./xmas-kelheim/VehicleAnimation.vue')),
+  },
+  {
+    kebabName: 'logistics',
+    filePatterns: ['**/*lsps.xml*', '**/viz-logistic*.y?(a)ml*'],
+    component: defineAsyncComponent(() => import('./logistics/LogisticsViewer.vue')),
   },
 ]
 

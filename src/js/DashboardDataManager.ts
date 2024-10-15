@@ -131,13 +131,26 @@ export default class DashboardDataManager {
         }
       }
 
+      // Firefox just silently dies if the text is too large. Set a timeout...
+      const withTimeout = (promise: Promise<any>, timeout: number) => {
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => {
+            reject(new Error(`Operation timed out after ${timeout}ms`))
+          }, timeout)
+        })
+        return Promise.race([promise, timeoutPromise])
+      }
+
       // wait for dataset to load
-      // (this will immediately return dataset if it is already loaded)
-      let myDataset = await this.datasets[config.dataset].dataset
+      // this will immediately return dataset if it is already loaded
+      let myDataset = await withTimeout(this.datasets[config.dataset].dataset, 60 * 1000)
+
+      let { _comments, ...allRows } = myDataset
+      let comments = _comments as unknown as string[]
 
       // make a copy because each viz in a dashboard might be hacking it differently
       // TODO: be more "functional" and return the object itself, and let views create copies if they need to
-      let allRows = { ...myDataset }
+      // let allRows = { ...myDataset }
 
       // remove ignored columns
       if (config.ignoreColumns) {
@@ -154,10 +167,11 @@ export default class DashboardDataManager {
         })
       }
 
-      return { allRows }
+      return { allRows, comments }
     } catch (e) {
-      // const message = '' + e
-      return { allRows: {} }
+      console.error('' + e)
+      throw Error(`loading ${config.dataset}. Missing? CSV too large?`)
+      return { allRows: {}, comments: [] }
     }
   }
 
@@ -274,9 +288,18 @@ export default class DashboardDataManager {
     cbStatus?: any
   ) {
     const path = `/${subfolder}/${filename}`
+    const options = {} as any
+    if (vizDetails.projection) options.crs = vizDetails.projection
+
     // Get the dataset the first time it is requested
     if (!this.networks[path]) {
-      this.networks[path] = this._fetchNetwork({ subfolder, filename, vizDetails, cbStatus })
+      this.networks[path] = this._fetchNetwork({
+        subfolder,
+        filename,
+        vizDetails,
+        cbStatus,
+        options,
+      })
     }
 
     // wait for the worker to provide the network
@@ -543,8 +566,8 @@ export default class DashboardDataManager {
 
         thread.onmessage = e => {
           thread.terminate()
-          if (e.data.error) {
-            let msg = '' + e.data.error
+          if (!e.data || e.data.error) {
+            let msg = '' + (e.data?.error || 'Error loading file')
             msg = msg.replace('[object Response]', 'Error loading file')
 
             if (config?.dataset && msg.indexOf(config.dataset) === -1) msg += `: ${config.dataset}`
@@ -634,9 +657,10 @@ export default class DashboardDataManager {
     filename: string
     vizDetails: any
     cbStatus?: any
+    options: { crs?: string }
   }) {
     return new Promise<NetworkLinks>(async (resolve, reject) => {
-      const { subfolder, filename, vizDetails, cbStatus } = props
+      const { subfolder, filename, vizDetails, cbStatus, options } = props
 
       const path = `/${subfolder}/${filename}`
       console.log('load network:', path)
@@ -699,6 +723,7 @@ export default class DashboardDataManager {
           filePath: path,
           fileSystem: this.fileApi,
           vizDetails,
+          options,
           isFirefox, // we need this for now, because Firefox bug #260
         })
       } catch (err) {

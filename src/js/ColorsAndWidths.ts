@@ -39,6 +39,25 @@ interface VizProperties {
   join?: string
 }
 
+export function buildColors(categories: any, colorRamp: string) {
+  let options = categories as string[]
+  if (typeof categories == 'string') {
+    options = categories.split(',').map(s => s.trim())
+  }
+
+  const scaleName = `interpolate${colorRamp || 'Rainbow'}`
+  //@ts-ignore
+  const scaleFunction = d3sc[scaleName] || d3sc.interpolateRainbow
+  const colorScale = scaleOrdinal()
+    .domain(options)
+    .range(options.map((_, i) => scaleFunction((i + 1) / options.length)))
+
+  const colorMap = {} as any
+  options.forEach((option: any) => (colorMap[option] = colorScale(option)))
+
+  return colorMap
+}
+
 function getColorsForDataColumn(props: VizProperties) {
   // First: if there is no dataColumn yet, return empty everything
   if (!props.data) {

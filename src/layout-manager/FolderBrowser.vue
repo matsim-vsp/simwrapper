@@ -11,23 +11,24 @@
    .vessel
 
     //- these are sections defined by viz-summary.yml etc
-    .curated-sections
+    .curated-sections(:id="idFolderTable")
 
-      //- file system folders
+      //- FOLDERS: file system folders
       h3.curate-heading(v-if="myState.folders.length")  {{ $t('Folders') }}
 
       .curate-content(v-if="myState.folders.length")
         .folder-table
           .folder(v-for="folder,i in myState.folders"
-                  :key="folder.name"
+                  :key="folder"
                   :class="{fade: myState.isLoading, 'up-folder': i == 0}"
                   @click="openOutputFolder(folder)"
           )
+            .is-favorite(v-if="isFavorite(folder)")
             p
               i.fa(:class="i == 0 ? 'fa-arrow-up' : 'fa-folder-open'")
               | &nbsp;{{ cleanName(folder) }}
 
-      //- this is the content of readme.md, if it exists
+      //- README: content of readme.md, if it exists
       .readme-header.markdown(v-if="myState.readme")
         .curate-content.markdown(v-html="myState.readme")
 
@@ -134,17 +135,29 @@ interface IMyState {
 import { defineComponent } from 'vue'
 import type { PropType } from 'vue'
 
+import katex from 'katex'
 import markdown from 'markdown-it'
+import markdownTex from 'markdown-it-texmath'
 import mediumZoom from 'medium-zoom'
 import micromatch from 'micromatch'
 import yaml from 'yaml'
 
 import globalStore from '@/store'
-import { BreadCrumb, FileSystemConfig, YamlConfigs } from '@/Globals'
+import { BreadCrumb, FavoriteLocation, FileSystemConfig, YamlConfigs } from '@/Globals'
 import HTTPFileSystem from '@/js/HTTPFileSystem'
 import { pluginComponents } from '@/plugins/pluginRegistry'
 
 import TopsheetsFinder from '@/components/TopsheetsFinder/TopsheetsFinder.vue'
+
+const mdRenderer = new markdown({
+  html: true,
+  linkify: true,
+  typographer: true,
+}).use(markdownTex, {
+  engine: katex,
+  delimiters: 'dollars',
+  katexOptions: { macros: { '\\RR': '\\mathbb{R}' } },
+})
 
 const tabColors = {
   // blank means dashboard:
@@ -173,14 +186,13 @@ export default defineComponent({
     xsubfolder: String,
   },
   data: () => {
+    const idFolderTable = `id-${Math.random()}`
     return {
       globalState: globalStore.state,
       summaryYamlFilename: 'viz-summary.yml',
-      mdRenderer: new markdown({
-        html: true,
-        linkify: true,
-        typographer: true,
-      }),
+      mdRenderer,
+      idFolderTable,
+      resizeObserver: {} as any,
       myState: {
         errorStatus: '',
         folders: [],
@@ -197,6 +209,16 @@ export default defineComponent({
     }
   },
   computed: {
+    favoriteLocations(): string[] {
+      const faves = this.$store.state.favoriteLocations.filter((fave: FavoriteLocation) => {
+        if (fave.root !== this.root) return false
+        if (!fave.subfolder.startsWith('' + this.xsubfolder)) return false
+        return true
+      }) as FavoriteLocation[]
+
+      return faves.map(f => f.fullPath || '')
+    },
+
     vizImages(): any {
       const images: { [index: number]: any } = {}
       for (let i = 0; i < this.myState.vizes.length; i++) {
@@ -218,6 +240,13 @@ export default defineComponent({
     },
   },
   methods: {
+    isFavorite(folder: string) {
+      let thing = `${this.root}`
+      if (this.xsubfolder) thing += `/${this.xsubfolder}`
+      thing += `/${folder}`
+      return this.favoriteLocations.indexOf(thing) > -1
+    },
+
     cleanName(text: string) {
       return decodeURIComponent(text)
     },
@@ -379,6 +408,8 @@ export default defineComponent({
         this.myState.errorStatus = ''
         this.myState.folders = [' UP'].concat(folders)
         this.myState.files = allVizes
+
+        await this.updateFolderLayout()
       } catch (err) {
         // Bad things happened! Tell user
         const e = err as any
@@ -456,6 +487,23 @@ export default defineComponent({
       // this happens async
       this.fetchFolderContents()
     },
+
+    async updateFolderLayout() {
+      await this.$nextTick()
+      const container = document.getElementById(this.idFolderTable) as any
+      if (!container) return
+
+      const items = this.myState.folders.length
+      const itemHeight = 36 // Approximate height of each item
+      const containerWidth = container.offsetWidth
+      const itemWidth = 200 // Minimum width of each item
+      const maxColumns = 1 + Math.floor(containerWidth / itemWidth)
+
+      let numRows = 8 + Math.ceil(items / maxColumns)
+      if (containerWidth < 500) numRows = 10000
+
+      container.style.setProperty('--num-rows', numRows)
+    },
   },
   watch: {
     'globalState.colorScheme'() {
@@ -501,8 +549,15 @@ export default defineComponent({
       }
     },
   },
+
   mounted() {
     this.updateRoute()
+
+    const dashboard = document.getElementById(this.idFolderTable) as HTMLElement
+    this.resizeObserver = new ResizeObserver(entries => {
+      this.updateFolderLayout()
+    })
+    this.resizeObserver.observe(dashboard)
   },
 })
 </script>
@@ -511,8 +566,9 @@ export default defineComponent({
 @import '@/styles.scss';
 
 .folder-browser {
-  padding: 0 0.5rem;
+  padding: 0 0.75rem;
 }
+
 .vessel {
   margin: 0 0;
   padding: 0rem 0rem 2rem 0rem;
@@ -600,11 +656,14 @@ h4 {
 
 .folder-table {
   display: grid;
-  gap: 4px;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 3px;
+  grid-auto-flow: column;
+  grid-template-columns: repeat(auto-fill, max-content);
+  grid-template-rows: repeat(var(--num-rows, 20), min-content);
   list-style: none;
   margin-bottom: 0px;
   padding-left: 0px;
+  line-height: 1.1rem;
 }
 
 .folder {
@@ -615,6 +674,7 @@ h4 {
   padding: 0.25rem 0.75rem;
   border-radius: 5px;
   word-wrap: break-word;
+  position: relative;
 }
 
 .folder:hover {
@@ -748,5 +808,26 @@ p.v-plugin {
 
 .up-folder {
   background-color: var(--bgTreeItem);
+}
+
+.is-favorite {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 25px 25px 0;
+  border-color: transparent #4444ff transparent transparent;
+  transform: rotate(0deg);
+}
+
+.is-favorite::after {
+  content: '★';
+  position: absolute;
+  top: -3px;
+  right: -23px;
+  font-size: 13px;
+  color: white;
 }
 </style>

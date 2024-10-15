@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react'
 import DeckGL from '@deck.gl/react'
+import { GeoJsonLayer } from '@deck.gl/layers'
 import { DataFilterExtension } from '@deck.gl/extensions'
 
 import { StaticMap, MapRef } from 'react-map-gl'
@@ -12,6 +13,8 @@ import { OFFSET_DIRECTION } from '@/layers/LineOffsetLayer'
 import GeojsonOffsetLayer from '@/layers/GeojsonOffsetLayer'
 
 import screenshots from '@/js/screenshots'
+
+import type { BackgroundLayer } from './ShapeFile.vue'
 
 interface DeckObject {
   index: number
@@ -28,8 +31,12 @@ export default function Component({
   opacity = 1,
   pointRadii = 4 as number | Float32Array,
   screenshot = 0,
+  redraw = 0,
   featureFilter = new Float32Array(0),
   cbTooltip = {} as any,
+  bgLayers = {} as { [name: string]: BackgroundLayer },
+  handleClickEvent = {} as any,
+  highlightedLinkIndex = -1 as number,
 }) {
   // const features = globalStore.state.globalCache[viewId] as any[]
   const [features, setFeatures] = useState([] as any[])
@@ -156,8 +163,11 @@ export default function Component({
   }
 
   // CLICK  ---------------------------------------------------------------------
-  function handleClick() {
-    console.log('click!')
+  function handleClick(event: any) {
+    // console.log('click!')
+    // console.log(event)
+    // TODO: send click event to parent
+    if (handleClickEvent) handleClickEvent(event)
   }
 
   // TOOLTIP ------------------------------------------------------------------
@@ -165,7 +175,47 @@ export default function Component({
     if (cbTooltip) cbTooltip(index, object)
   }
 
-  const layer = new GeojsonOffsetLayer({
+  // BACKGROUND-LAYERS --------------------------------------------------
+  const backgroundLayers = [] as any[]
+  const onTopLayers = [] as any[]
+
+  for (const name of Object.keys(bgLayers).reverse()) {
+    const layerDetails = bgLayers[name]
+
+    // if (layerDetails.visible == false) continue
+
+    const bgLayer = new GeoJsonLayer({
+      id: `background-layer-${name}`,
+      data: layerDetails.features,
+      getFillColor: (d: any) => d.properties.__fill__,
+      getLineColor: layerDetails.borderColor,
+      getLineWidth: layerDetails.borderWidth,
+      // getText: layerDetails.label ? (d: any) => d.properties[layerDetails.label] : null,
+      getText: (d: any) => d.properties.label,
+      getTextSize: 12,
+      getTextColor: [255, 255, 255, 255],
+      getTextBackgroundColor: [0, 0, 0, 255],
+      pointType: 'circle+text',
+      textFontWeight: 'bold',
+      lineWidthUnits: 'pixels',
+      autohighlight: false,
+      opacity: layerDetails.opacity,
+      pickable: false,
+      stroked: layerDetails.borderWidth ? true : false,
+      fp64: false,
+      parameters: { depthTest: false },
+      visible: layerDetails.visible,
+    })
+
+    if (layerDetails.onTop) {
+      onTopLayers.push(bgLayer)
+    } else {
+      backgroundLayers.push(bgLayer)
+    }
+  }
+
+  // ----------------------------------------------------------------------------
+  const mainLayer = new GeojsonOffsetLayer({
     id: 'geoJsonOffsetLayer',
     data: features,
     // function callbacks: --------------
@@ -175,8 +225,8 @@ export default function Component({
     getPointRadius: cbPointRadius,
     getElevation: cbFillHeight,
     // settings: ------------------------
-    autoHighlight: true,
     extruded: !!fillHeights,
+    highlightedObjectIndex: highlightedLinkIndex,
     highlightColor: [255, 0, 224],
     // lineJointRounded: true,
     lineWidthUnits: 'pixels',
@@ -228,7 +278,7 @@ export default function Component({
     /*
     //@ts-ignore */
     <DeckGL
-      layers={[layer]}
+      layers={[...backgroundLayers, mainLayer, ...onTopLayers]}
       viewState={viewState}
       controller={true}
       pickingRadius={4}

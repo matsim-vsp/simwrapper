@@ -1,6 +1,8 @@
 <template lang="pug">
 #main-app(:class="{'full-page-app' : true, 'dark-mode': isDarkMode}" )
 
+  top-nav-bar.top-bar(v-if="(!$store.state.topNavItems && !$store.state.leftNavItems)")
+
   .center-area(v-if="isFileSystemLoaded")
     //- login-panel.login-panel
     router-view.main-content
@@ -33,12 +35,11 @@ import maplibregl from 'maplibre-gl'
 import { get } from 'idb-keyval'
 
 import globalStore from '@/store'
+import plugins from '@/plugins/pluginRegistry'
 import { ColorScheme, MAPBOX_TOKEN, MAP_STYLES_OFFLINE } from '@/Globals'
 import { addInitialLocalFilesystems, addLocalFilesystem } from '@/fileSystemConfig'
 
-// import LoginPanel from '@/components/LoginPanel.vue'
-
-import plugins from '@/plugins/pluginRegistry'
+import TopNavBar from '@/layout-manager/TopNavBar.vue'
 
 // MAPBOX TOKEN
 // this is a required workaround to get the mapbox token assigned in TypeScript
@@ -59,7 +60,7 @@ plugins.forEach(p => {
 export default defineComponent({
   name: 'SimWrapper',
   i18n,
-  components: {},
+  components: { TopNavBar },
   data: () => {
     return {
       state: globalStore.state,
@@ -255,16 +256,14 @@ canvas {
 
 .top-bar {
   width: 100%;
-  padding: 0 3rem;
   margin: 0 auto;
-  max-width: $sizeVessel;
   transition: padding 0.2s ease-in-out, max-width 0.3s ease-in-out;
   // box-shadow: 0px 6px 10px #00000048;
   z-index: 5;
 }
 
 .top-bar.full-page-app {
-  padding: 0 1rem;
+  padding: 0 0;
   max-width: unset;
 }
 
@@ -742,12 +741,11 @@ p.splash-label {
   top: 0;
 }
 
-@media only screen and (max-width: 640px) {
-  .top-bar {
-    padding-left: 1rem;
-    padding-right: 1rem;
-  }
+.katex-html {
+  display: none !important;
+}
 
+@media only screen and (max-width: 640px) {
   .breadcrumbs {
     padding-left: 1rem;
     padding-right: 1rem;
