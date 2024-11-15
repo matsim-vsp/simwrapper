@@ -3,6 +3,11 @@
 
   modal-id-column-picker(v-if="showJoiner" v-bind="datasetJoinSelector" @join="cbDatasetJoined")
 
+  .status-box(v-if="statusText")
+          p {{ statusText }}
+          b-progress.load-progress(v-if="loadProgress > 0"
+            :value="loadProgress" :rounded="false" type='is-success')
+
   .main-layout(
       @mousemove.stop="dividerDragging"
   )
@@ -19,14 +24,19 @@
         p(v-if="!legendStore.state?.sections?.length" style="font-size: 1.1rem"): b INFO PANEL
         legend-box(:legendStore="legendStore")
 
-      .tooltip-html(v-if="tooltipHtml && !statusText" v-html="tooltipHtml")
+      .tooltip-html(v-if="tooltipHtml && !statusText"
+        v-html="tooltipHtml"
+      )
         .bglayer-section
           b-checkbox.simple-checkbox(v-for="layer in Object.keys(bgLayers)" :key="layer"
             @input="updateBgLayers" v-model="bgLayers[layer].visible"
           ) {{  layer }}
 
     .area-map(v-if="!thumbnail" :id="`container-${layerId}`")
-      .status-bar(v-show="false && statusText") {{ statusText }}
+
+      .tooltip-when-no-legend-present(v-if="!showLegend && !statusText && tooltipHtml"
+        v-html="tooltipHtml"
+      )
 
       //- drawing-tool.draw-tool(v-if="isLoaded && !thumbnail")
 
@@ -45,6 +55,8 @@
         :handleClickEvent="handleClickEvent"
         :highlightedLinkIndex="highlightedLinkIndex"
         :redraw="redraw"
+        :features="boundaries"
+        :dark="globalStore.state.isDarkMode"
       )
 
       //- :features="useCircles ? centroids: boundaries"
@@ -112,6 +124,8 @@ import reproject from 'reproject'
 import Sanitize from 'sanitize-filename'
 import YAML from 'yaml'
 
+import * as Gpkg from '@ngageoint/geopackage'
+
 import * as d3ScaleChromatic from 'd3-scale-chromatic'
 import * as d3Interpolate from 'd3-interpolate'
 import { scaleSequential } from 'd3-scale'
@@ -166,6 +180,45 @@ export interface BackgroundLayer {
   borderColor: number[]
   visible: boolean
   onTop: boolean
+}
+
+const BASE_URL = import.meta.env.BASE_URL
+
+export async function loadGeoPackageFromBuffer(buffer: ArrayBuffer) {
+  Gpkg.setSqljsWasmLocateFile(file => BASE_URL + file)
+  const bArray = new Uint8Array(buffer)
+
+  const geoPackage = await Gpkg.GeoPackageAPI.open(bArray)
+
+  const tables = geoPackage.getFeatureTables()
+  console.log('GEOPACKAGE contains:', tables)
+  const tableName = tables[0]
+
+  // get the feature dao
+  const featureDao = geoPackage.getFeatureDao(tableName)
+  const tableInfo = geoPackage.getInfoForTable(featureDao)
+  // console.log({ featureDao, tableInfo })
+
+  const crs = `${tableInfo.srs.organization}:${tableInfo.srs.id}`
+  console.log('GEOPACKAGE crs:', crs)
+
+  const features = []
+  const tableElements = featureDao.queryForEach()
+  for (const row of tableElements) {
+    const { geom, ...properties } = row
+    const geoJsonGeometry = new Gpkg.GeometryData(geom as any)
+    const geojson = geoJsonGeometry.toGeoJSON()
+    const wgs84 = reproject.toWgs84(geojson, crs, Coords.allEPSGs)
+
+    features.push({
+      type: 'Feature',
+      properties,
+      geometry: wgs84,
+    })
+  }
+
+  geoPackage.close()
+  return features
 }
 
 const MyComponent = defineComponent({
@@ -243,7 +296,7 @@ const MyComponent = defineComponent({
 
       datasetJoinSelector: {} as { [id: string]: { title: string; columns: string[] } },
       showJoiner: false,
-      showLegend: true,
+      showLegend: false,
 
       // DataManager might be passed in from the dashboard; or we might be
       // in single-view mode, in which case we need to create one for ourselves
@@ -316,6 +369,10 @@ const MyComponent = defineComponent({
       },
 
       datasets: {} as { [id: string]: DataTable },
+
+      loadProgress: 0,
+      loadSteps: 0,
+      totalLoadSteps: 6,
     }
   },
 
@@ -370,20 +427,24 @@ const MyComponent = defineComponent({
 
   watch: {
     'globalState.viewState'() {
-      if (!REACT_VIEW_HANDLES[this.layerId]) return
-      REACT_VIEW_HANDLES[this.layerId]()
+      if (REACT_VIEW_HANDLES[this.layerId]) REACT_VIEW_HANDLES[this.layerId]()
     },
 
-    'globalState.colorScheme'() {
-      // change one element to force a deck.gl redraw
-      this.$nextTick().then(p => {
-        const tooltips = this.vizDetails.tooltip || []
-        this.vizDetails.tooltip = [...tooltips]
-      })
-    },
+    // 'globalState.colorScheme'() {
+    // // change one element to force a deck.gl redraw
+    // this.$nextTick().then(p => {
+    //   const tooltips = this.vizDetails.tooltip || []
+    //   this.vizDetails.tooltip = [...tooltips]
+    // })
+    // },
   },
 
   methods: {
+    incrementLoadProgress() {
+      this.loadSteps += 1
+      this.loadProgress = (100 * this.loadSteps) / this.totalLoadSteps
+    },
+
     dividerDragStart(e: MouseEvent) {
       console.log('dragStart', e)
       this.isDraggingDivider = e.clientX
@@ -766,11 +827,12 @@ const MyComponent = defineComponent({
           this.vizDetails = Object.assign({}, emptyState, ycfg)
         }
 
-        // OR is this a bare geojson/shapefile file? - build vizDetails manually
+        // OR is this a bare geojson/geopackage/shapefile file? - build vizDetails manually
         if (
           /(network\.xml)(|\.gz)$/.test(filename) ||
           /(\.geojson)(|\.gz)$/.test(filename) ||
           /\.shp$/.test(filename) ||
+          /\.gpkg$/.test(filename) ||
           /network\.avro$/.test(filename)
         ) {
           const title = `${filename.endsWith('shp') ? 'Shapefile' : 'File'}: ${this.yamlConfig}`
@@ -972,7 +1034,7 @@ const MyComponent = defineComponent({
       })
 
       this.myDataManager.addFilterListener(
-        { dataset: this.datasetKeyToFilename[datasetId] },
+        { dataset: this.datasetKeyToFilename[datasetId], subfolder: this.subfolder },
         this.processFiltersNow
       )
 
@@ -1039,7 +1101,7 @@ const MyComponent = defineComponent({
       } as any
 
       this.myDataManager.addFilterListener(
-        { dataset: this.datasetKeyToFilename[datasetId] },
+        { dataset: this.datasetKeyToFilename[datasetId], subfolder: this.subfolder },
         this.processFiltersNow
       )
 
@@ -1240,6 +1302,7 @@ const MyComponent = defineComponent({
         this.dataCalculatedValues = calculatedValues
         this.dataCalculatedValueLabel = `${relative ? '% ' : ''}Diff: ${columnName}` // : ${key1}-${key2}`
 
+        this.showLegend = true
         this.legendStore.setLegendSection({
           section: section === 'fill' ? 'FillColor' : 'Line Color',
           column: dataCol1.name,
@@ -1296,6 +1359,7 @@ const MyComponent = defineComponent({
 
       this.dataCalculatedValues = calculatedValues
 
+      this.showLegend = true
       this.legendStore.setLegendSection({
         section: section === 'fill' ? 'FillColor' : 'Line Color',
         column: columnName,
@@ -1431,6 +1495,7 @@ const MyComponent = defineComponent({
         this.dataCalculatedValues = calculatedValues
         this.dataNormalizedValues = calculatedValues || null
 
+        this.showLegend = true
         this.legendStore.setLegendSection({
           section: 'FillColor',
           column: dataColumn.name,
@@ -1589,12 +1654,15 @@ const MyComponent = defineComponent({
           })
           this.dataLineWidths = variableConstantWidth
         }
+
+        this.showLegend = true
         this.legendStore.setLegendSection({
           section: 'Line Color',
           column: dataColumn.name,
           values: legend,
           normalColumn: normalColumn ? normalColumn.name : '',
         })
+        this.showLegend = true
       }
     },
 
@@ -1655,6 +1723,7 @@ const MyComponent = defineComponent({
           this.dataCalculatedValues = calculatedValues
           this.dataCalculatedValueLabel = 'Diff: ' + columnName
 
+          this.showLegend = true
           this.legendStore.setLegendSection({
             section: 'Line Width',
             column: `${dataCol1.name} (Diff)`,
@@ -1709,6 +1778,7 @@ const MyComponent = defineComponent({
           this.dataCalculatedValueLabel = columnName
 
           if (legend.length) {
+            this.showLegend = true
             this.legendStore.setLegendSection({
               section: 'Line Width',
               column: dataColumn.name,
@@ -1814,7 +1884,7 @@ const MyComponent = defineComponent({
 
         // no selected dataset or datacol missing? Not sure what to do here, just give up...
         if (!selectedDataset) {
-          console.warn('radius: no selected dataset yet, maybe still loading')
+          // console.warn('radius: no selected dataset yet, maybe still loading')
           return
         }
 
@@ -2150,6 +2220,7 @@ const MyComponent = defineComponent({
           this.vizDetails,
           (message: string) => {
             this.statusText = message
+            this.incrementLoadProgress()
           }
         )
         // for now convert to shapefile
@@ -2177,6 +2248,16 @@ const MyComponent = defineComponent({
       }
     },
 
+    async loadGeoPackage(filename: string) {
+      this.statusText = 'Loading geopackage...'
+      console.log('loading', filename)
+      const url = `${this.subfolder}/${filename}`
+      const blob = await this.fileApi.getFileBlob(url)
+      const buffer = await blob.arrayBuffer()
+      const geo = loadGeoPackageFromBuffer(buffer)
+      return geo
+    },
+
     async loadBoundaries() {
       let now = Date.now()
 
@@ -2193,8 +2274,11 @@ const MyComponent = defineComponent({
 
       try {
         this.statusText = 'Loading features...'
+        this.incrementLoadProgress()
 
-        if (filename.startsWith('http')) {
+        if (filename.toLocaleLowerCase().endsWith('gpkg')) {
+          boundaries = await this.loadGeoPackage(filename)
+        } else if (filename.startsWith('http')) {
           // geojson from url!
           boundaries = (await fetch(filename).then(async r => await r.json())).features
         } else if (filename.toLocaleLowerCase().endsWith('.shp')) {
@@ -2203,7 +2287,6 @@ const MyComponent = defineComponent({
         } else if (filename.toLocaleLowerCase().indexOf('.xml') > -1) {
           // MATSim XML Network
           boundaries = await this.loadXMLNetwork(filename)
-          console.log(777, { boundaries })
         } else if (filename.toLocaleLowerCase().includes('network.avro')) {
           // avro network!
           boundaries = await this.loadAvroNetwork(filename)
@@ -2212,7 +2295,10 @@ const MyComponent = defineComponent({
           boundaries = (await this.fileApi.getFileJson(`${this.subfolder}/${filename}`)).features
         }
 
+        await this.$nextTick()
         this.statusText = 'Processing data...'
+        this.incrementLoadProgress()
+        await this.$nextTick()
         await this.$nextTick()
 
         // for a big speedup, move properties to its own nabob
@@ -2256,6 +2342,7 @@ const MyComponent = defineComponent({
 
         // set feature properties as a data source
         await this.setFeaturePropertiesAsDataSource(filename, [...featureProperties], shapeConfig)
+        this.incrementLoadProgress()
 
         // turn ON line borders if it's a SMALL dataset (user can re-enable)
         if (!hasNoLines || boundaries.length < 5000) {
@@ -2266,7 +2353,13 @@ const MyComponent = defineComponent({
         if (hasNoPolygons) this.isAreaMode = false
         if (hasPoints) this.isAreaMode = true
 
+        this.statusText = 'Adding boundaries to map'
+        await this.$nextTick()
+        this.incrementLoadProgress()
+
         this.boundaries = boundaries
+        await this.$nextTick()
+        this.incrementLoadProgress()
 
         // generate centroids if we have polygons
         if (!hasNoPolygons || hasPoints) {
@@ -2287,10 +2380,8 @@ const MyComponent = defineComponent({
         const err = e as any
         const message = err.statusText || 'Could not load'
         const fullError = `${message}: "${filename}"`
-
         this.statusText = ''
         this.$emit('isLoaded')
-
         throw Error(fullError)
       }
 
@@ -2325,8 +2416,7 @@ const MyComponent = defineComponent({
           }
           avroTable[colName] = dataColumn
         }
-
-        // special case: allowedModes
+        // special case: allowedModes needs to be looked up
         const modeLookup = this.avroNetwork['modes']
         const allowedModes = avroTable['allowedModes']
         allowedModes.type = DataType.STRING
@@ -2598,7 +2688,9 @@ const MyComponent = defineComponent({
         // save the filename and key for later lookups
         this.datasetKeyToFilename[datasetKey] = datasetFilename
 
-        const dataset = await this.myDataManager.getDataset(loaderConfig)
+        const dataset = await this.myDataManager.getDataset(loaderConfig, {
+          subfolder: this.subfolder,
+        })
 
         // figure out join - use ".join" or first column key
         const joiner =
@@ -2619,7 +2711,10 @@ const MyComponent = defineComponent({
         await this.$nextTick()
 
         // Set up filters -- there could be some in YAML already
-        this.myDataManager.addFilterListener({ dataset: datasetFilename }, this.processFiltersNow)
+        this.myDataManager.addFilterListener(
+          { dataset: datasetFilename, subfolder: this.subfolder },
+          this.processFiltersNow
+        )
         this.activateFiltersForDataset(datasetKey)
         // this.handleNewFilters(this.vizDetails.filters)
       } catch (e) {
@@ -2858,10 +2953,11 @@ const MyComponent = defineComponent({
 
           let features = [] as any[]
           try {
-            // load boundaries ---
             const filename = layerDetails.shapes
             if (filename.startsWith('http'))
               features = (await fetch(filename).then(async r => await r.json())).features
+            else if (filename.toLocaleLowerCase().endsWith('.gpkg'))
+              features = await this.loadGeoPackage(filename)
             else if (filename.toLocaleLowerCase().endsWith('.shp'))
               features = await this.loadShapefileFeatures(filename)
             else
@@ -3110,7 +3206,7 @@ export default MyComponent
 
   .legend-panel {
     position: absolute;
-    top: 0;
+    top: 2px;
     left: 0;
     right: 0;
     display: flex;
@@ -3133,6 +3229,20 @@ export default MyComponent
     right: 0;
     border-top: 1px solid #88888880;
   }
+}
+
+.tooltip-when-no-legend-present {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  z-index: 20;
+  font-size: 0.8rem;
+  padding: 0.25rem;
+  margin: 0.25rem 0.25rem;
+  min-width: 12rem;
+  text-align: left;
+  background-color: var(--bgCardFrame);
+  border: 1px solid #88888880;
 }
 
 .config-bar {
@@ -3247,5 +3357,48 @@ export default MyComponent
 
 .simple-checkbox:hover {
   color: unset;
+}
+
+.status-box {
+  position: absolute;
+  bottom: 0.25rem;
+  left: 0.25rem;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bgPanel);
+  padding: 0.25rem 3rem;
+  margin: auto auto;
+  min-width: 20rem;
+  max-width: 25rem;
+  height: 4rem;
+  border: 3px solid #cccccc80;
+  // filter: $filterShadow;
+
+  a {
+    color: white;
+    text-decoration: none;
+
+    &.router-link-exact-active {
+      color: white;
+    }
+  }
+
+  p {
+    color: var(--textFancy);
+    font-weight: normal;
+    font-size: 0.9rem;
+    line-height: 1rem;
+    margin: auto 0;
+    padding: 0 0;
+    text-align: center;
+  }
+}
+
+.load-progress {
+  padding: 0 5rem;
+  height: 3px;
+  margin-top: 2px;
+  margin-bottom: 0.5rem;
 }
 </style>

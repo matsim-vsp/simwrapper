@@ -1,14 +1,20 @@
 export interface RouteDetails {
   id: string
-  departures: number
+  lineId: string
   firstDeparture: string
   lastDeparture: string
   geojson: any
-  routeProfile: string[]
+  routeProfile: any[]
   route: string[]
   transportMode: string
   uniqueRouteID?: number
   gtfsRouteType?: number
+  departures: number
+  pax?: number
+  cap?: number
+  loadfac?: number
+  color?: string
+  currentColor?: string
 }
 
 export interface Network {
@@ -36,6 +42,10 @@ export interface NetworkLink {
 
 export interface TransitLine {
   id: string
+  name?: string
   transitRoutes: RouteDetails[]
   gtfsRouteType: number
+  check?: boolean
+  show?: boolean
+  isOpen?: boolean
 }

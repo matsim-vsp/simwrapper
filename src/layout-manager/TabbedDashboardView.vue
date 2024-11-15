@@ -4,23 +4,21 @@
   p.load-error(v-show="loadErrorMessage" @click="authorizeAfterError"): b {{ loadErrorMessage }}
 
   .tabholder(v-if="isShowingBreadcrumbs && !isMultipanel && !isZoomed" :style="dashWidthCalculator")
-    .tabholdercontainer.white-text
+    .tab-holder-container.flex-col.white-text
+      .project-path.flex-row(v-show="!header")
+          bread-crumbs.breadcrumbs(
+              :root="root"
+              :subfolder="xsubfolder"
+              @navigate="onNavigate"
+              @crumbs="updateCrumbs"
+          )
+          p.favorite-icon(v-if="!header"
+              @click="clickedFavorite"
+              title="Favorite"
+              :class="{'is-favorite': isFavorite}"
+            ): i.fa.fa-star
+
       .project-header(v-if="header" v-html="header")
-
-      .project-path.flex-row(v-else)
-
-        bread-crumbs.breadcrumbs(
-            :root="root"
-            :subfolder="xsubfolder"
-            @navigate="onNavigate"
-            @crumbs="updateCrumbs"
-        )
-
-        p.favorite-icon(
-            @click="clickedFavorite"
-            title="Favorite"
-            :class="{'is-favorite': isFavorite}"
-          ): i.fa.fa-star
 
   .dashboard-finder(:class="{isMultipanel, isZoomed}")
     ul.dashboard-right-sections(v-show="!isZoomed && Object.keys(dashboards).length > 1")
@@ -55,7 +53,7 @@
     )
 
   footer.footer-holder(v-show="showFooter && !isZoomed" :class="{wiide}" :style="dashWidthCalculator")
-    .tabholdercontainer(:class="{wiide}")
+    .tab-holder-container(:class="{wiide}")
       .project-footer(v-if="footer" v-html="footer" :class="{wiide}")
 
 </template>
@@ -195,6 +193,11 @@ export default defineComponent({
     },
 
     onNavigate(options: any) {
+      // make sure folders have a trailing slash or relative paths in markdown files die
+      if (options?.props?.xsubfolder) {
+        if (!options.props.xsubfolder.endsWith('/')) options.props.xsubfolder += '/'
+      }
+
       this.$emit('navigate', options)
       this.setTitle()
     },
@@ -661,14 +664,11 @@ export default defineComponent({
   padding: 0.5rem 0rem 0.5rem 0rem;
 }
 
-.tabholdercontainer {
+.tab-holder-container {
   margin: 0 $cardSpacing;
-  display: flex;
-  flex-direction: row;
-  // background-image: linear-gradient(45deg, #0c8ed3, #8f00ff);
 }
 
-.tabholdercontainer.wiide {
+.tab-holder-container.wiide {
   margin: 0 0rem;
 }
 
