@@ -172,9 +172,11 @@ export default class DashboardDataManager {
 
       return { allRows, comments }
     } catch (e) {
-      console.error('' + e)
-      throw Error(`loading ${config.dataset}. Missing? CSV too large?`)
-      return { allRows: {}, comments: [] }
+      const msg = ('' + e).replaceAll('Error: ', '')
+      console.error(msg)
+      throw Error(msg)
+      // throw Error(`loading ${config.dataset}. Missing? CSV too large?`)
+      // return { allRows: {}, comments: [] }
     }
   }
 
@@ -655,8 +657,12 @@ export default class DashboardDataManager {
       linkIds[i] = linkID
     }
 
-    const links = { source, dest, linkIds, projection: 'EPSG:4326' }
+    const links = { source, dest, linkIds, projection: 'EPSG:4326' } as any
 
+    // add network attributes back in
+    for (const col of network.linkAttributes) {
+      if (col !== 'linkId') links[col] = network[col]
+    }
     return links
   }
 
