@@ -134,7 +134,7 @@ let fileSystems: FileSystemConfig[] = [
     skipList: ['episim/battery'],
   },
   {
-    name: 'Berlin Open Scenario v6',
+    name: 'Berlin Open Scenario v6.4',
     slug: 'open-berlin',
     description: 'Standard dashboard from the MATSim SimWrapper contrib',
     thumbnail: 'images/thumb-localfiles.jpg',
