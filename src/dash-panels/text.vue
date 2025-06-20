@@ -4,6 +4,7 @@
     .curate-content.markdown(
       v-if="readmeContent"
       v-html="htmlWithProcessedRelativeImageTags"
+      v-markdown-links
     )
 
 </template>
@@ -34,8 +35,64 @@ export default defineComponent({
   props: {
     fileSystemConfig: { type: Object as PropType<FileSystemConfig>, required: true },
     subfolder: { type: String, required: true },
+    split: { type: Object, required: true }, // {y,x}
     files: { type: Array, required: true },
     config: { type: Object as any, required: true },
+  },
+
+  // Vue directives let me process user clicks on links: needed for links in splitview mode
+  directives: {
+    markdownLinks: {
+      unbind(el: any) {
+        if (el._markdownHandler) {
+          el.removeEventListener('click', el._markdownHandler)
+          delete el._markdownHandler
+        }
+      },
+      inserted(el: Element, binding: any, vnode: any) {
+        const handler = (event: any) => {
+          try {
+            const target = event.target?.closest('a')
+            if (target) {
+              const path = vnode?.context?.$route?.path || ''
+              if (path.startsWith('/split/')) {
+                const href = target.getAttribute('href')
+                // only capture local relative links; external links behave as normal.
+                if (!href.startsWith('http')) {
+                  // figure out relative path and get this panel's details
+                  const mythis = vnode.context
+                  const split = mythis.$props.split
+                  const splitData = JSON.parse(atob(path.slice(7)))
+                  const thisPanel = splitData[split.row][split.col]
+
+                  // generate new path for this panel
+                  thisPanel.key = Math.random()
+                  const proposed = `${mythis.$props.subfolder}/${href}`
+                  thisPanel.key = Math.random()
+                  thisPanel.props.xsubfolder = proposed
+
+                  // regenerate base64 for split URL
+                  const base64 = btoa(JSON.stringify(splitData))
+
+                  // halt regular navigation
+                  event.preventDefault()
+
+                  // goooo
+                  mythis.$router.push(`/split/${base64}`)
+                }
+              }
+            }
+          } catch (e) {
+            console.error('FAILED special split nav; sorry: ' + e)
+          }
+        }
+
+        // store the listener so we can remove it later
+        //@ts-ignore
+        el._markdownHandler = handler
+        el.addEventListener('click', handler)
+      },
+    },
   },
 
   data: () => {
@@ -60,19 +117,22 @@ export default defineComponent({
   },
 
   async mounted() {
+    let filename
     try {
       // if height is defined, honor it. Otherwise, panel will stretch to fit content
       this.hasHeight = !!this.config.height
 
       if (!this.config.content) {
         const fileApi = new HTTPFileSystem(this.fileSystemConfig)
-        const filename = `${this.subfolder}/${this.config.file}`
+        filename = `${this.subfolder}/${this.config.file}`
         const text = await fileApi.getFileText(filename)
         this.readmeContent = mdRenderer.render(text)
       } else {
         this.readmeContent = mdRenderer.render(this.config.content)
       }
     } catch (e: any) {
+      this.$emit('error', `Error loading: ${filename}`)
+
       console.error({ e })
       let error = '' + e
       if (e.statusText) error = e.statusText

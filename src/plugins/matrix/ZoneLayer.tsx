@@ -88,11 +88,14 @@ export default function Component({
   // --------------------------------------------------------------------------
   const highlight = activeZoneFeature ? [activeZoneFeature] : []
 
+  const highlightColor = [255, 0, 224]
+  // globalStore.state.isDarkMode ? [255, 255, 255] : [255, 0, 224]
+
   const highlightLayer = new GeoJsonLayer({
     id: 'HighlightLayer',
     data: highlight,
     getLineWidth: 6,
-    getLineColor: [255, 255, 255],
+    getLineColor: highlightColor,
     getFillColor: [0, 0, 0, 0], // fully transparent
     lineJointRounded: true,
     lineWidthUnits: 'pixels',
@@ -115,7 +118,7 @@ export default function Component({
     opacity: isLoading ? 0.8 : 1.0, // fillHeights ? 1.0 : 0.8, // 3D must be opaque
     pickable: true,
     stroked: false,
-    highlightColor: [255, 0, 224, 128],
+    highlightColor: [255, 255, 255, 128],
     useDevicePixels: isTakingScreenshot,
     fp64: false,
     material: false,

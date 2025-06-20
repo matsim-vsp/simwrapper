@@ -1,21 +1,26 @@
 <template lang="pug">
 .matrix-viewer(v-if="!thumbnail")
-  config-panel(
+  config-panel(v-if="activeTable"
     :isMap="isMap"
     :mapConfig="mapConfig"
     :comparators="comparators"
     :compareLabel="compareLabel"
-    @setMap="isMap=$event"
+    :catalog="h5Main?.catalog || []"
+    :activeTable="activeTable"
+    @changeMatrix="changeMatrix"
+    @setMap="setMap"
     @shapes="filenameShapes=$event"
     @changeColor="changeColor"
     @changeScale="changeScale"
-    @changeRowWise="changeRowWise"
-    @addBase="addBase"
     @compare="compareToBase"
+    @toggleComparePicker="toggleComparePicker"
   )
 
+  .getting-matrices(v-if="isGettingMatrices")
+      .fxl Loading...
+
   .main-area(
-    :class="{'is-dragging': isDragging}"
+    :class="{'is-dragging': isDragging, 'is-getting-matrices': isGettingMatrices}"
     @drop="onDrop"
     @dragstart="dragStart"
     @dragover="stillDragging"
@@ -27,23 +32,35 @@
     .status-text(v-if="statusText")
       h4 {{ statusText }}
 
-    H5Map-viewer.fill-it(v-if="isMap && h5fileBlob"
+    H5Map-viewer.fill-it(v-if="isMap && h5Main?.size"
       :fileApi="fileApi"
+      :fileSystem="fileSystem"
       :subfolder="subfolder"
       :blob="h5fileBlob"
       :baseBlob="h5baseBlob"
       :filenameH5="filename"
+      :filenameBase="filenameBase"
       :filenameShapes="filenameShapes"
+      :matrices="matrices"
+      :matrixSize="h5Main?.size || 0"
       :shapes="shapes"
       :userSuppliedZoneID="zoneID"
       :mapConfig="mapConfig"
       :zoneSystems="zoneSystems"
+      :tazToOffsetLookup="h5zoneLookup"
       @nozones="isMap=false"
-    )
+      @changeRowWise="changeRowWise"
+      )
 
-    H5Web.fill-it.h5-table-viewer(v-if="h5fileBlob && !isMap"
+    h5-table-viewer.fill-it.h5-table-viewer(v-if="h5fileBlob && !isMap"
       :filename="filename"
       :blob="h5fileBlob"
+    )
+
+    compare-file-picker(v-if="showComparePicker"
+      :fileApi="fileApi"
+      :subfolder="subfolder"
+      @choose="chooseCompareFile"
     )
 
 </template>
@@ -60,13 +77,15 @@ import { FileSystemConfig } from '@/Globals'
 import HTTPFileSystem from '@/js/HTTPFileSystem'
 import { gUnzip } from '@/js/util'
 
-import H5Web from './H5TableViewer'
+import H5TableViewer from './H5TableViewer'
 import H5MapViewer from './H5MapViewer.vue'
 import ConfigPanel from './ConfigPanel.vue'
 
 import { ColorMap } from '@/components/ColorMapSelector/models'
 import { ScaleType } from '@/components/ScaleSelector/ScaleOption'
 import { COLORMAP_GROUPS } from '@/components/ColorMapSelector/groups'
+import CompareFilePicker from './CompareFilePicker.vue'
+import H5Provider, { Matrix } from './H5Provider'
 
 export interface ComparisonMatrix {
   root: string
@@ -96,7 +115,7 @@ const BASE_URL = import.meta.env.BASE_URL
 
 const MyComponent = defineComponent({
   name: 'MatrixViewer',
-  components: { H5Web, H5MapViewer, ConfigPanel },
+  components: { H5TableViewer, H5MapViewer, ConfigPanel, CompareFilePicker },
   props: {
     root: { type: String, required: true },
     subfolder: { type: String, required: true },
@@ -115,14 +134,18 @@ const MyComponent = defineComponent({
       compareLabel: 'Compare...',
       isDragging: false,
       isMap: true,
-      h5wasm: null as null | Promise<any>,
-      h5zoneFile: null as null | H5WasmFile,
+      isGettingMatrices: false,
+      showComparePicker: false,
       h5fileBlob: null as null | File | Blob,
       h5baseBlob: null as null | File | Blob,
+      h5zoneLookup: {} as any,
       globalState: globalStore.state,
       filename: '',
       filenameShapes: '',
       filenameBase: '',
+      h5Main: null as null | H5Provider,
+      h5Compare: null as null | H5Provider,
+      matrices: {} as { [key: string]: Matrix },
       shapes: null as null | any[],
       useConfig: '',
       vizDetails: {
@@ -135,11 +158,10 @@ const MyComponent = defineComponent({
       },
       statusText: 'Loading...',
       layerId: Math.floor(1e12 * Math.random()),
-      matrices: ['1', '2'] as string[],
       activeTable: '',
       debounceDragEnd: {} as any,
       mapConfig: {
-        scale: ScaleType.Linear,
+        scale: ScaleType.Log,
         colormap: 'Viridis',
         isInvertedColor: false,
         isRowWise: true,
@@ -162,17 +184,35 @@ const MyComponent = defineComponent({
     }
 
     await this.setupAvailableZoneSystems()
-
     this.fetchLastSettings()
+    this.honorQueryParameters()
 
     // not really done loading yet but the spinny is ugly
     this.$emit('isLoaded')
 
     this.comparators = this.setupComparisons()
-
     this.shapes = await this.loadShapes()
-    this.h5fileBlob = (await this.loadFile()) || null
-    this.h5baseBlob = (await this.loadBaseFile()) || null
+
+    try {
+      await this.initH5Files()
+      if (!this.h5Main) return
+
+      this.h5zoneLookup = await this.buildTAZLookup()
+      let initialTable =
+        `${this.$route.query.table}` ||
+        localStorage.getItem('matrix-initial-table') ||
+        this.h5Main?.catalog[0]
+
+      // if saved table is not in THIS matrix, revert to first table
+      if (initialTable && !this.h5Main.catalog.includes(initialTable)) {
+        initialTable = this.h5Main?.catalog[0]
+      }
+
+      if (initialTable) await this.changeMatrix(initialTable)
+    } catch (e) {
+      this.$emit('error', `Error loading file: ${this.subfolder}/${this.filename}`)
+      console.error('' + e)
+    }
 
     if (this.h5baseBlob) this.compareLabel = `Compare ${this.filename} to ${this.filenameBase}`
   },
@@ -213,6 +253,138 @@ const MyComponent = defineComponent({
   },
 
   methods: {
+    async setMap(isMap: boolean) {
+      this.isMap = isMap
+
+      if (isMap) {
+        this.h5fileBlob = null
+      } else {
+        this.h5fileBlob = await this.buildH5Blob()
+      }
+    },
+
+    async buildH5Blob() {
+      // we are going to fabricate an HDF5 file with the current matrix content!
+      const { FS } = await h5wasmReady
+      let f = new H5WasmFile('matrix', 'w')
+      const size = Math.floor(Math.sqrt(this.matrices.main.data.length))
+
+      f.create_dataset({ name: `A: Values`, data: this.matrices.main.data, shape: [size, size] })
+
+      if (this.matrices.diff) {
+        f.create_dataset({ name: `B: Compare`, data: this.matrices.base.data, shape: [size, size] })
+        f.create_dataset({
+          name: `C: Diff A-B`,
+          data: this.matrices.diff.data,
+          shape: [size, size],
+        })
+      }
+
+      f.flush()
+      f.close()
+
+      const tableLabel = this.activeTable.replaceAll('&nbsp;', ' ')
+      const fileData = FS.readFile('matrix')
+      const blob = new File([fileData], tableLabel, { type: 'application/octet-stream' })
+      return blob
+    },
+
+    async addBase() {},
+
+    async changeMatrix(table: any) {
+      console.log('table:', table)
+      if (!table || table == 'undefined') {
+        this.activeTable = ''
+        // TODO
+        this.$router.replace({ query: {} })
+        return
+      }
+
+      this.activeTable = table
+      this.$router.replace({ query: { ...this.$route.query, table } })
+      await this.getMatrices()
+      localStorage.setItem('matrix-initial-table', table)
+
+      if (!this.isMap) this.h5fileBlob = await this.buildH5Blob()
+    },
+
+    async getMatrices() {
+      this.isGettingMatrices = true
+      await this.$nextTick()
+
+      let which = this.activeTable + ' from main file'
+      try {
+        const mainMatrix = await this.h5Main?.getDataArray(this.activeTable)
+        if (!mainMatrix) return
+
+        const matrices = {
+          main: mainMatrix,
+        } as { [id: string]: Matrix }
+
+        if (this.h5Compare) {
+          which = this.activeTable + ' from comparison file'
+          const baseMatrix = await this.h5Compare?.getDataArray(this.activeTable)
+          if (baseMatrix) {
+            matrices.base = baseMatrix
+
+            const diff = new Float32Array(mainMatrix.data.length)
+            mainMatrix.data.forEach((v, i) => {
+              diff[i] = v - baseMatrix.data[i]
+            })
+            matrices.diff = {
+              data: diff,
+              path: mainMatrix.path,
+              table: this.activeTable,
+            }
+          }
+        }
+        this.matrices = matrices
+      } catch (e) {
+        this.$emit('error', `Error extracting ${which}`)
+        console.error('' + e)
+      } finally {
+        this.isGettingMatrices = false
+        this.statusText = ''
+      }
+    },
+
+    async initH5Files() {
+      if (!this.yamlConfig) {
+        this.statusText = `Drop an HDF5 matrix file and GeoJSON boundary file here to view it`
+        return
+      }
+      if (!this.fileSystem) return
+
+      this.statusText = `Loading: ${this.filename}...`
+      await this.$nextTick()
+
+      // if we have a yaml config, use it
+      this.filename = '' + this.yamlConfig
+      if (this.config) this.filename = this.config.dataset
+
+      this.h5Main = new H5Provider({
+        fileSystem: this.fileSystem,
+        subfolder: this.subfolder,
+        filename: this.filename,
+      })
+
+      // this opens file, sets up the shape and matrix catalog
+      await this.h5Main.init()
+
+      this.statusText = ''
+    },
+
+    async chooseCompareFile(comparison: any) {
+      this.showComparePicker = false
+      if (!comparison) return
+      await this.compareToBase(comparison)
+      if (!this.isMap) this.h5fileBlob = await this.buildH5Blob()
+    },
+
+    toggleComparePicker() {
+      this.showComparePicker = !this.showComparePicker
+    },
+
     fetchLastSettings() {
       if (this.vizDetails.colors) {
         // Use config if we have one
@@ -236,9 +408,27 @@ const MyComponent = defineComponent({
       }
     },
 
+    honorQueryParameters() {
+      const query = this.$route.query as any
+      if (query.inverted == 'true') this.mapConfig.isInvertedColor = true
+      if (query.colors) this.mapConfig.colormap = query.colors
+      if (query.scale) this.mapConfig.scale = query.scale
+      if (query.dir) this.mapConfig.isRowWise = query.dir == 'row'
+    },
+
+    updateQuery() {
+      const { invert, scale, colors, ...query } = this.$route.query as any
+      query.dir = this.mapConfig.isRowWise ? 'row' : 'col'
+      if (this.mapConfig.colormap !== 'Viridis') query.colors = this.mapConfig.colormap
+      if (this.mapConfig.isInvertedColor) query.invert = 'true'
+      if (this.mapConfig.scale !== 'linear') query.scale = this.mapConfig.scale
+      this.$router.replace({ query }).catch(() => {})
+    },
+
     saveMapSettings() {
       const json = JSON.stringify(this.mapConfig)
       localStorage.setItem('matrixviewer-map-config', json)
+      this.updateQuery()
     },
 
     async loadShapes() {
@@ -259,39 +449,6 @@ const MyComponent = defineComponent({
         console.error('' + e)
       }
       return null
-    },
-
-    async loadBaseFile() {
-      if (!this.yamlConfig) return null
-      if (this.config) this.filenameBase = this.config.basedata
-      if (!this.filenameBase) return null
-
-      this.statusText = `Loading: ${this.filenameBase}...`
-
-      const path = `${this.subfolder}/${this.filenameBase}`
-      const blob = await this.fileApi?.getFileBlob(path)
-      this.statusText = ''
-      return blob
-    },
-
-    async loadFile() {
-      if (!this.yamlConfig) {
-        this.statusText = `Drop an HDF5 or GeoJSON file here to view it`
-        return null
-      }
-
-      // if we have a yaml config, use it
-      this.filename = '' + this.yamlConfig
-      if (this.config) {
-        this.filename = this.config.dataset
-      }
-
-      this.statusText = `Loading: ${this.filename}...`
-
-      const path = `${this.subfolder}/${this.filename}`
-      const blob = await this.fileApi?.getFileBlob(path)
-      this.statusText = ''
-      return blob
     },
 
     async loadYamlConfig() {
@@ -333,7 +490,7 @@ const MyComponent = defineComponent({
         // are we in a dashboard?
         this.config = JSON.parse(JSON.stringify(this.configFromDashboard))
         this.vizDetails = Object.assign({}, this.configFromDashboard)
-        this.$emit('title', this.config.title || `Matrix - ${this.yamlConfig}`)
+        this.$emit('title', this.config.title || `File: ${this.yamlConfig}`)
       } else {
         // was a YAML file was passed in?
         const filename = (this.yamlConfig ?? '').toLocaleLowerCase()
@@ -342,7 +499,7 @@ const MyComponent = defineComponent({
           this.config = ycfg
           this.vizDetails = Object.assign({}, ycfg)
         }
-        this.$emit('title', this.config?.title || `Matrix - ${filename}`)
+        this.$emit('title', this.config?.title || `File: ${filename}`)
       }
     },
 
@@ -357,7 +514,6 @@ const MyComponent = defineComponent({
     },
 
     changeColor(event: any) {
-      console.log('33333', event)
       if (!event) {
         // inversion
         this.mapConfig.isInvertedColor = !this.mapConfig.isInvertedColor
@@ -365,7 +521,6 @@ const MyComponent = defineComponent({
         // all other config
         this.mapConfig.colormap = event
       }
-
       this.saveMapSettings()
     },
 
@@ -376,60 +531,28 @@ const MyComponent = defineComponent({
       return JSON.parse(comparisons)
     },
 
-    addBase() {
-      const comparator = {
-        root: this.root,
-        subfolder: this.subfolder,
-        filename: this.filename,
-      }
+    async compareToBase(comparisonMatrix: ComparisonMatrix) {
+      if (!this.fileSystem) return
 
-      // just save the last one
-      this.comparators = [comparator]
+      this.h5Compare = new H5Provider({
+        fileSystem: this.fileSystem,
+        subfolder: comparisonMatrix.subfolder,
+        filename: comparisonMatrix.filename,
+      })
 
-      // only save this as a possible comparator matrix IF we have a root filesystem
-      // since those are the only ones we can retrieve later...
-      // (drag/drop files don't have a path associated with them)
-      if (this.root) {
-        localStorage.setItem('h5mapComparators', JSON.stringify(this.comparators))
-      }
-
-      this.compareToBase(comparator)
-    },
-
-    async compareToBase(base: ComparisonMatrix) {
-      console.log('COMPARE', base)
-
-      this.filenameBase = base.filename
+      await this.h5Compare.init()
 
       // drag/drop mode, no "root" filesystem. Just set this as base.
-      if (base.root === '') {
-        this.h5baseBlob = this.h5fileBlob
-        this.setCompareLabel(base.filename)
+      if (comparisonMatrix.root === '') {
+        // this.h5baseBlob = this.h5fileBlob
+        // this.setCompareLabel(base.filename)
         return
       }
 
-      try {
-        const path = `${base.subfolder}/${base.filename}`
-        this.statusText = `Loading: ${base.filename}...`
+      this.compareLabel = `Compare to ${comparisonMatrix.subfolder}/${comparisonMatrix.filename}`
 
-        const fileSystem: FileSystemConfig = this.$store.state.svnProjects.find(
-          (a: FileSystemConfig) => a.slug === base.root
-        )
-        const baseFileApi = new HTTPFileSystem(fileSystem, globalStore)
-
-        const blob = await baseFileApi.getFileBlob(path)
-
-        this.h5baseBlob = blob
-        this.compareLabel = `Compare: ${this.filename} to ${base.filename}`
-        this.statusText = ''
-        this.setCompareLabel(base.filename)
-        this.setDivergingColors()
-        console.log({ h5BaseBlob: this.h5baseBlob })
-      } catch (e) {
-        console.error('' + e)
-        this.h5baseBlob = null
-      }
-      this.statusText = ''
+      this.setDivergingColors()
+      await this.getMatrices()
     },
 
     setDivergingColors() {
@@ -484,7 +607,7 @@ const MyComponent = defineComponent({
       this.statusText = 'Drop to load file'
     },
 
-    async dragEnd(event: any) {
+    dragEnd(event: any) {
       this.isDragging = false
       this.statusText = ''
     },
@@ -499,13 +622,25 @@ const MyComponent = defineComponent({
       this.h5fileBlob = null
       await this.$nextTick()
 
+      this.h5Main = new H5Provider({
+        file,
+        subfolder: '',
+        filename: this.filename,
+      })
+
+      // this opens file, sets up the dimensions and matrix catalog
+      await this.h5Main.init()
+
       this.h5fileBlob = file
       this.filename = file.name || 'File'
       this.$emit('title', this.filename)
       this.setCompareLabel(file.name)
       this.statusText = ''
 
-      return
+      this.h5zoneLookup = await this.buildTAZLookup()
+
+      const initialTable = localStorage.getItem('matrix-initial-table') || this.h5Main?.catalog[0]
+      if (initialTable) await this.changeMatrix(initialTable)
     },
 
     async handleDroppedBoundaries(file: File) {
@@ -556,6 +691,28 @@ const MyComponent = defineComponent({
       } catch (e) {
         console.error('ZONESYSTEM: ' + e)
       }
+    },
+
+    async buildTAZLookup() {
+      const lookup = {} as any
+      if (!this.h5Main) return lookup
+
+      // If "zone_number" array exists, build lookup from that
+      // console.log(this.h5Main.catalog)
+      if (this.h5Main?.catalog?.indexOf('zone_number') > -1) {
+        const zoneNumbers = await this.h5Main.getDataArray('zone_number')
+        // console.log({ zoneNumbers })
+        zoneNumbers.data.forEach((zone, offset) => {
+          lookup[zone] = offset
+        })
+      } else {
+        // Otherwise assume numbers just increase
+        // console.log(this.h5Main?.size)
+        for (let i = 1; i <= this.h5Main.size; i++) {
+          lookup[i] = i - 1
+        }
+      }
+      return lookup
     },
   },
 })
@@ -608,11 +765,12 @@ export default MyComponent
   display: flex;
   flex-direction: column;
   z-index: 50;
+  pointer-events: none;
 }
 
 .status-text h4 {
-  margin: auto 0rem;
-  padding: 3rem 0;
+  margin: auto auto;
+  padding: 1.5rem;
   background-color: #444455ee;
 }
 
@@ -625,6 +783,34 @@ export default MyComponent
   display: flex;
   flex-direction: column;
   flex: 1;
-  padding: 0.75rem;
+  // padding: 0.75rem;
+}
+
+.getting-matrices {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 600;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  filter: $filterShadow;
+}
+
+.fxl {
+  padding: 1rem 5rem;
+  background-color: white;
+  color: #333;
+  text-align: center;
+  vertical-align: middle;
+  font-weight: bold;
+  border: 5px solid #06e07e;
+}
+
+.is-getting-matrices {
+  opacity: 0.5;
 }
 </style>

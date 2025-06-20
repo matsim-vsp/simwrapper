@@ -1,7 +1,11 @@
 <template lang="pug">
 .shapefile-viewer(:class="{'hide-thumbnail': !thumbnail}" :style='{"background": urlThumbnail}' oncontextmenu="return false")
 
-  modal-id-column-picker(v-if="showJoiner" v-bind="datasetJoinSelector" @join="cbDatasetJoined")
+  modal-id-column-picker(v-if="showJoiner"
+    v-bind="datasetJoinSelector"
+    @join="cbDatasetJoined"
+    header="Which column contains the unique ID for each shape/feature?"
+  )
 
   .status-box(v-if="statusText")
           p {{ statusText }}
@@ -9,7 +13,7 @@
             :value="loadProgress" :rounded="false" type='is-success')
 
   .main-layout(
-      @mousemove.stop="dividerDragging"
+      @mousemove="dividerDragging"
   )
 
     .dragger(v-show="showLegend"
@@ -48,7 +52,7 @@
         :fillHeights="dataFillHeights"
         :screenshot="triggerScreenshot"
         :featureFilter="boundaryFilters"
-        :opacity="sliderOpacity"
+        :opacity="(sliderOpacity / 100) * (sliderOpacity / 100)"
         :pointRadii="dataPointRadii"
         :cbTooltip="cbTooltip"
         :bgLayers="bgLayers"
@@ -56,8 +60,11 @@
         :highlightedLinkIndex="highlightedLinkIndex"
         :redraw="redraw"
         :features="boundaries"
-        :dark="globalStore.state.isDarkMode"
+        :dark="globalState.isDarkMode"
+        :isRGBA="isRGBA"
       )
+
+      background-map-on-top(v-if="isLoaded && isAreaMode")
 
       //- :features="useCircles ? centroids: boundaries"
       //- background-map-on-top(v-if="isLoaded")
@@ -77,8 +84,11 @@
         @toggleLegend="showLegend=!showLegend"
       )
 
-      .details-panel
-
+      .width-sliders.flex-row(v-if="isAreaMode"
+        :style="{backgroundColor: globalState.isDarkMode ? '#00000099': '#ffffffaa'}"
+      )
+          img.icon-blue-ramp(:src="icons.blueramp")
+          b-slider.pie-slider(type="is-success" :tooltip="true" size="is-small"  :min="0" :max="100" v-model="sliderOpacity")
 
       zoom-buttons(v-if="isLoaded && !thumbnail")
 
@@ -124,6 +134,7 @@ import reproject from 'reproject'
 import Sanitize from 'sanitize-filename'
 import YAML from 'yaml'
 
+import GMNS from '@simwrapper/gmns'
 import * as Gpkg from '@ngageoint/geopackage'
 
 import * as d3ScaleChromatic from 'd3-scale-chromatic'
@@ -165,6 +176,8 @@ import { LayerDefinition } from '@/components/viz-configurator/Layers.vue'
 import Coords from '@/js/Coords'
 import LegendStore from '@/js/LegendStore'
 
+import IconBlueRamp from './assets/icon-blue-ramp.png'
+
 interface FilterDetails {
   column: string
   label?: string
@@ -205,8 +218,11 @@ export async function loadGeoPackageFromBuffer(buffer: ArrayBuffer) {
   const features = []
   const tableElements = featureDao.queryForEach()
   for (const row of tableElements) {
-    const { geom, ...properties } = row
-    const geoJsonGeometry = new Gpkg.GeometryData(geom as any)
+    const { the_geom, geom, ...properties } = row
+    const geometryData = the_geom ?? geom
+    if (!geometryData) continue
+
+    const geoJsonGeometry = new Gpkg.GeometryData(geometryData as any)
     const geojson = geoJsonGeometry.toGeoJSON()
     const wgs84 = reproject.toWgs84(geojson, crs, Coords.allEPSGs)
 
@@ -245,11 +261,14 @@ const MyComponent = defineComponent({
 
   data() {
     return {
+      icons: { blueramp: IconBlueRamp },
+      opacitySlider: 50,
       avroNetwork: null as any,
+      isAreaMode: false,
       isAvroFile: false,
-      //drag
       isDraggingDivider: 0,
       isDragHappening: false,
+      isLoaded: false,
       dragStartWidth: 200,
       legendSectionWidth: 200,
       //
@@ -279,8 +298,9 @@ const MyComponent = defineComponent({
 
       maxValue: 1000,
       expColors: false,
-      isLoaded: false,
-      isAreaMode: true,
+      // sometimes color data has transparency so it's 4-stride RGBA instead of 3-stride RGB
+      isRGBA: false,
+
       statusText: 'Loading...',
 
       // Filters. Key is column id; value array is empty for "all" or a list of "or" values
@@ -833,9 +853,13 @@ const MyComponent = defineComponent({
           /(\.geojson)(|\.gz)$/.test(filename) ||
           /\.shp$/.test(filename) ||
           /\.gpkg$/.test(filename) ||
-          /network\.avro$/.test(filename)
+          /network.*\.avro$/.test(filename) ||
+          /.gmns.zip$/.test(filename) ||
+          /.gmns$/.test(filename)
         ) {
-          const title = `${filename.endsWith('shp') ? 'Shapefile' : 'File'}: ${this.yamlConfig}`
+          let title = this.yamlConfig
+          if (filename.endsWith('shp')) title = `Shapefile: ${this.yamlConfig}`
+          if (filename.indexOf('.gmns') > -1) title = `GMNS Network: ${this.yamlConfig}`
 
           this.vizDetails = Object.assign({}, emptyState, this.vizDetails, {
             title,
@@ -1025,6 +1049,10 @@ const MyComponent = defineComponent({
 
       console.log('HANDLE NEW DATASET:', datasetId, datasetFilename)
 
+      // If user hasn't already given us the join column, ask now.
+      if (!this.featureJoinColumn) this.featureJoinColumn = await this.figureOutFeatureIdColumn()
+      console.log('---featureIDColumn', this.featureJoinColumn)
+
       if (!this.boundaryDataTable[this.featureJoinColumn])
         throw Error(`Geodata does not have property ${this.featureJoinColumn}`)
 
@@ -1053,6 +1081,7 @@ const MyComponent = defineComponent({
     },
 
     setupJoin(props: { dataTable: DataTable; datasetId: string; dataJoinColumn: string }) {
+      console.log(88, this.featureJoinColumn)
       const { dataTable, datasetId, dataJoinColumn } = props
       // console.log('> setupJoin', datasetId, dataJoinColumn)
 
@@ -1466,8 +1495,8 @@ const MyComponent = defineComponent({
             dataTable: this.datasets[dataset],
             dataJoinColumn,
           })
-          normalLookup = this.datasets[dataset][`@@${dataJoinColumn}`]
         }
+        normalLookup = this.datasets[dataset][`@@${dataJoinColumn}`]
       }
 
       const ramp = {
@@ -1478,10 +1507,22 @@ const MyComponent = defineComponent({
         breakpoints: color.colorRamp?.breakpoints || undefined,
       }
 
+      // separate transparency field? ------------
+      let transparencyCol
+      if (color.transparency) {
+        const [key, column] = color.transparency.split('/')
+        transparencyCol = this.datasets[key][column]
+        if (!transparencyCol) {
+          throw Error(`Dataset ${key} does not contain column "${column}"`)
+        }
+      }
+
       // Calculate colors for each feature
-      const { rgbArray, legend, calculatedValues } = ColorWidthSymbologizer.getColorsForDataColumn({
+      // const { rgbArray, legend, calculatedValues, isRGBA } =
+      const result = ColorWidthSymbologizer.getColorsForDataColumn({
         numFeatures: this.boundaries.length,
         data: dataColumn,
+        transparency: transparencyCol,
         normalColumn,
         normalLookup,
         lookup: lookupColumn,
@@ -1490,11 +1531,16 @@ const MyComponent = defineComponent({
         join: color.join,
       })
 
+      const { rgbArray, legend, calculatedValues } = result
+
+      //@ts-ignore -- result might or might not have isRGBA defined
+      const isRGBA = result.isRGBA || false
+
       if (rgbArray) {
         this.dataFillColors = rgbArray
         this.dataCalculatedValues = calculatedValues
         this.dataNormalizedValues = calculatedValues || null
-
+        this.isRGBA = isRGBA
         this.showLegend = true
         this.legendStore.setLegendSection({
           section: 'FillColor',
@@ -1980,7 +2026,9 @@ const MyComponent = defineComponent({
       // if there's only one column, we're done
       const featureDataset = this.datasets[Object.keys(this.datasets)[0]]
       const availableColumns = Object.keys(featureDataset)
-      if (availableColumns.length === 1) return availableColumns[0]
+      if (availableColumns.length === 1) {
+        return availableColumns[0]
+      }
 
       // ask the user
       const join: string = await new Promise((resolve, reject) => {
@@ -2001,7 +2049,6 @@ const MyComponent = defineComponent({
           resolve(join)
         }
       })
-
       return join.length ? join : 'id'
     },
 
@@ -2149,6 +2196,15 @@ const MyComponent = defineComponent({
     //   console.error('' + e)
     // }
 
+    async loadGMNSFeatures(filename: string) {
+      // load .zip file
+      const path = `${this.subfolder}/${filename}`
+      const blob = await this.fileApi.getFileBlob(path)
+      const gmns = await GMNS.load(path, blob)
+      const geojson = GMNS.toGeojson(gmns)
+      return geojson.features
+    },
+
     async loadAvroNetwork(filename: string) {
       const path = `${this.subfolder}/${filename}`
       const blob = await this.fileApi.getFileBlob(path)
@@ -2171,7 +2227,7 @@ const MyComponent = defineComponent({
       // Build features with geometry, but no properties yet
       // (properties get added in setFeaturePropertiesAsDataSource)
       const numLinks = network.linkId.length
-      const features = [] as any
+      const features = [] as any[]
       const crs = network.crs || 'EPSG:4326'
       const needsProjection = crs !== 'EPSG:4326' && crs !== 'WGS84'
 
@@ -2259,8 +2315,6 @@ const MyComponent = defineComponent({
     },
 
     async loadBoundaries() {
-      let now = Date.now()
-
       const shapeConfig =
         this.config.boundaries || this.config.shapes || this.config.geojson || this.config.network
 
@@ -2277,22 +2331,33 @@ const MyComponent = defineComponent({
         this.incrementLoadProgress()
 
         if (filename.toLocaleLowerCase().endsWith('gpkg')) {
+          console.log('--GPKG')
           boundaries = await this.loadGeoPackage(filename)
         } else if (filename.startsWith('http')) {
           // geojson from url!
+          console.log('--HTTP to JSON file')
           boundaries = (await fetch(filename).then(async r => await r.json())).features
         } else if (filename.toLocaleLowerCase().endsWith('.shp')) {
           // shapefile!
+          console.log('--SHP')
           boundaries = await this.loadShapefileFeatures(filename)
+        } else if (filename.toLocaleLowerCase().indexOf('.gmns') > -1) {
+          // GMNS!
+          console.log('--GMNS')
+          boundaries = await this.loadGMNSFeatures(filename)
         } else if (filename.toLocaleLowerCase().indexOf('.xml') > -1) {
           // MATSim XML Network
+          console.log('--MATSIM XML')
           boundaries = await this.loadXMLNetwork(filename)
-        } else if (filename.toLocaleLowerCase().includes('network.avro')) {
+        } else if (/network.*\.avro$/.test(filename.toLocaleLowerCase())) {
           // avro network!
+          console.log('--AVRO')
           boundaries = await this.loadAvroNetwork(filename)
         } else {
           // geojson!
-          boundaries = (await this.fileApi.getFileJson(`${this.subfolder}/${filename}`)).features
+          console.log('--GEOJSON')
+          const json = await this.fileApi.getFileJson(`${this.subfolder}/${filename}`)
+          boundaries = json.features
         }
 
         await this.$nextTick()
@@ -2350,8 +2415,7 @@ const MyComponent = defineComponent({
         }
 
         // hide polygon/point buttons and opacity if we have no polygons or we do have points
-        if (hasNoPolygons) this.isAreaMode = false
-        if (hasPoints) this.isAreaMode = true
+        if (!hasNoPolygons || hasPoints) this.isAreaMode = true
 
         this.statusText = 'Adding boundaries to map'
         await this.$nextTick()
@@ -2385,7 +2449,9 @@ const MyComponent = defineComponent({
         throw Error(fullError)
       }
 
-      if (!this.boundaries) throw Error(`No "features" found in shapes file`)
+      if (!this.boundaries || this.boundaries.length === 0) {
+        throw Error(`No "features" found in shapes file`)
+      }
     },
 
     async setFeaturePropertiesAsDataSource(
@@ -2485,7 +2551,7 @@ const MyComponent = defineComponent({
     async generateCentroidsAndMapCenter() {
       this.statusText = 'Calculating centroids...'
       await this.$nextTick()
-      const idField = this.config.shapes.join || 'id'
+      const idField = this.config?.shapes?.join || 'id'
 
       // Find the map center while we're here
       let centerLong = 0
@@ -2555,10 +2621,10 @@ const MyComponent = defineComponent({
       }
 
       try {
-        const dbfFilename = url
-          .replace('.shp', '.dbf')
-          .replace('.SHP', '.DBF')
-          .replace('.Shp', '.Dbf')
+        let dbfFilename = url
+        if (dbfFilename.endsWith('.shp')) dbfFilename = dbfFilename.slice(0, -4) + '.dbf'
+        if (dbfFilename.endsWith('.SHP')) dbfFilename = dbfFilename.slice(0, -4) + '.DBF'
+        if (dbfFilename.endsWith('.Shp')) dbfFilename = dbfFilename.slice(0, -4) + '.Dbf'
         dbfPromise = await this.fileApi.getFileBlob(dbfFilename)
         dbfBlob = await (await dbfPromise)?.arrayBuffer()
       } catch {
@@ -2586,10 +2652,10 @@ const MyComponent = defineComponent({
 
       // See if there is a .prj file with projection information
       let projection = DEFAULT_PROJECTION
-      const prjFilename = url
-        .replace('.shp', '.prj')
-        .replace('.SHP', '.PRJ')
-        .replace('.Shp', '.Prj')
+      let prjFilename = url
+      if (prjFilename.endsWith('.shp')) prjFilename = prjFilename.slice(0, -4) + '.prj'
+      if (prjFilename.endsWith('.SHP')) prjFilename = prjFilename.slice(0, -4) + '.PRJ'
+      if (prjFilename.endsWith('.Shp')) prjFilename = prjFilename.slice(0, -4) + '.Prj'
       try {
         projection = await this.fileApi.getFileText(prjFilename)
       } catch (e) {
@@ -2618,9 +2684,7 @@ const MyComponent = defineComponent({
       const firstPoint = getFirstPoint(geojson.features[0].geometry.coordinates)
       if (Math.abs(firstPoint[0]) > 180 || Math.abs(firstPoint[1]) > 90) {
         // this ain't lon/lat
-        const msg = `Coordinates not lon/lat. Try adding projection to YAML, or provide ${prjFilename.substring(
-          1 + prjFilename.lastIndexOf('/')
-        )}`
+        const msg = `Coordinates not lon/lat. Try adding projection to YAML, or provide a .prj file`
         this.$emit('error', msg)
         this.statusText = ''
         return []
@@ -2657,6 +2721,10 @@ const MyComponent = defineComponent({
 
     async loadDatasets() {
       const keys = Object.keys(this.vizDetails.datasets)
+
+      // Ask for shapes feature ID if it's not obvious/specified already
+      if (keys.length > 1) this.featureJoinColumn = await this.figureOutFeatureIdColumn()
+
       for (const key of keys) {
         // don't reload datasets we already loaded
         if (key in this.datasets) continue
@@ -2693,10 +2761,11 @@ const MyComponent = defineComponent({
         })
 
         // figure out join - use ".join" or first column key
+        const firstColumn = Object.keys(dataset.allRows)[0]
         const joiner =
           'string' === typeof this.config.datasets[datasetKey]
-            ? Object.keys(dataset.allRows)[0]
-            : this.config.datasets[datasetKey].join
+            ? firstColumn
+            : this.config.datasets[datasetKey].join || firstColumn
 
         const joinColumns = joiner?.split(':') || []
 
@@ -3055,6 +3124,21 @@ const MyComponent = defineComponent({
           .map((coord: any) => parseFloat(coord))
         this.config.center = this.config.center.split(',').map((coord: any) => parseFloat(coord))
       }
+      // sometimes user doesn't use long/lat
+      if (
+        this.config.center &&
+        (Math.abs(this.config.center[0]) > 180 || Math.abs(this.config.center[1]) > 90)
+      ) {
+        this.$emit(
+          'error',
+          `Invalid map center coordinate specified. This doesn't look like longitude/latitude: ${this.config.center}`
+        )
+        const initialView = this.globalState.viewState
+        this.vizDetails.center = [initialView.longitude, initialView.latitude]
+        this.config.center = [initialView.longitude, initialView.latitude]
+        this.vizDetails.zoom = initialView.zoom
+        this.config.zoom = initialView.zoom
+      }
 
       this.buildThumbnail()
       if (this.thumbnail) return
@@ -3107,9 +3191,6 @@ const MyComponent = defineComponent({
       this.honorQueryParameters()
 
       this.statusText = ''
-
-      // Ask for shapes feature ID if it's not obvious/specified already
-      this.featureJoinColumn = await this.figureOutFeatureIdColumn()
 
       this.loadBackgroundLayers()
     } catch (e) {
@@ -3400,5 +3481,32 @@ export default MyComponent
   height: 3px;
   margin-top: 2px;
   margin-bottom: 0.5rem;
+}
+
+.width-sliders {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  user-select: none;
+  border-top-right-radius: 5px;
+  // pointer-events: all;
+}
+
+.icon-blue-ramp {
+  margin: 8px -2px 4px 10px;
+  height: 1rem;
+  width: 1.4rem;
+}
+
+.icon-pie-slider {
+  margin: 7px -2px 4px 2px;
+  height: 1.4rem;
+  width: 1.4rem;
+}
+
+.pie-slider {
+  width: 10rem;
+  padding: 1rem;
+  margin: 0;
 }
 </style>

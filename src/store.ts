@@ -66,6 +66,7 @@ export default new Vuex.Store({
     isInitialViewSet: false,
     favoriteLocations: [] as FavoriteLocation[],
     fileHandleAccessRequests: [] as any[],
+    flaskConfig: {} as { storage?: any; readme?: string; tagline?: string },
     leftNavItems: null as null | {
       top: NavigationItem[]
       middle: NavigationItem[]
@@ -80,9 +81,8 @@ export default new Vuex.Store({
     visualizationTypes: new Map() as Map<string, VisualizationPlugin>,
     colorScheme: ColorScheme.DarkMode,
     locale: 'en',
-    localFileHandles: [] as any[],
+    localFileHandles: [] as { key: string; handle: any }[],
     localURLShortcuts: {} as { [id: string]: FileSystemConfig },
-    numLocalFileSystems: 0,
     runFolders: {} as { [root: string]: any[] },
     runFolderCount: 0,
     resizeEvents: 0,
@@ -133,6 +133,10 @@ export default new Vuex.Store({
       state.credentials[value.url] = creds
       state.authAttempts++
     },
+    setFlaskConfig(state, json: { storage?: any; readme?: string; tagline?: string }) {
+      state.flaskConfig = json
+    },
+
     setFullScreen(state, value: boolean) {
       state.isFullScreen = value
     },
@@ -246,9 +250,8 @@ export default new Vuex.Store({
       state.locale = value.toLocaleLowerCase()
       if (isMainThread) localStorage.setItem('locale', state.locale)
     },
-    addLocalFileSystem(state, value: any) {
+    addLocalFileSystem(state, value: { key: string; handle: any }) {
       state.localFileHandles.unshift(value)
-      state.numLocalFileSystems += 1
     },
     setLocalFileSystem(state, value: any) {
       state.localFileHandles = value

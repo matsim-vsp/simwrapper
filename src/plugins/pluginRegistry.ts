@@ -14,14 +14,21 @@ const plugins = [
     component: defineAsyncComponent(() => import('./xy-time/XyTime.vue')),
   },
   {
+    kebabName: 'layer-map',
+    filePatterns: [],
+    component: defineAsyncComponent(() => import('./layer-map/LayerMap.vue')),
+  },
+  {
     kebabName: 'area-map',
     filePatterns: [
       '**/viz-map*.y?(a)ml',
       '**/*.geojson?(.gz)',
-      '**/*network.avro',
+      '**/*network*.avro',
       '**/*network.xml?(.gz)',
       '**/*.shp',
       '**/*.gpkg',
+      '**/*.gmns',
+      '**/*.gmns.zip',
     ],
     component: defineAsyncComponent(() => import('./shape-file/ShapeFile.vue')),
   },

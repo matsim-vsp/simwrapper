@@ -15,27 +15,53 @@ if (typeof window !== 'undefined') {
   websiteLiveHost = `${loc?.protocol}//${webLiveHostname}`
 }
 
+/** Flask filesystems are running the latest Python flask app which
+ * supports OMX file slices!
+ */
+export function addFlaskFilesystems(flaskEntries: { [id: string]: any }) {
+  const roots = Object.keys(flaskEntries)
+  for (const slug of roots) {
+    const params = flaskEntries[slug]
+    const fsconfig: FileSystemConfig = {
+      name: slug,
+      slug,
+      description: params.description,
+      baseURL: window.location.origin, // params.path,
+      omx: true,
+    }
+    fileSystems.unshift(fsconfig)
+  }
+}
+
 export function addInitialLocalFilesystems(
-  filesystems: { handle: FileSystemAPIHandle; key: string | null }[]
+  filesystems: { handle: FileSystemAPIHandle; key: string }[]
 ) {
-  for (let i = 0; i < filesystems.length; i++) {
-    const slug = 'fs' + (1 + i)
-    const system: FileSystemConfig = {
+  filesystems.forEach((fsystem, i) => {
+    const slug = `${fsystem.key}`
+    const fsconfig: FileSystemConfig = {
       name: filesystems[i].handle.name,
       slug: slug,
       description: 'Local folder',
       handle: filesystems[i].handle,
       baseURL: '',
     }
-    fileSystems.unshift(system)
-    globalStore.commit('addLocalFileSystem', { key: system.slug, handle: system.handle })
-  }
-
-  // hang onto count so that we don't overlap as Christian removes and re-adds folders
+    // place at the front of the list
+    fileSystems.unshift(fsconfig)
+    globalStore.commit('addLocalFileSystem', { key: fsconfig.slug, handle: fsconfig.handle })
+  })
 }
 
 export function addLocalFilesystem(handle: FileSystemAPIHandle, key: string | null) {
-  const slug = key || 'fs' + (1 + globalStore.state.numLocalFileSystems)
+  let slug = key
+  if (!slug) {
+    let max = 0
+    globalStore.state.localFileHandles.forEach(local => {
+      const fs = local.key.split('-')[0]
+      const num = parseInt(fs.substring(2))
+      max = Math.max(max, num)
+    })
+    slug = `fs${max + 1}-${handle.name}`
+  }
 
   const system: FileSystemConfig = {
     name: handle.name,
@@ -59,6 +85,14 @@ export function addLocalFilesystem(handle: FileSystemAPIHandle, key: string | nu
 
 let fileSystems: FileSystemConfig[] = [
   // DO NOT REMOVE THESE, THEY ARE FOR INTERNAL APP USE
+  {
+    name: 'github',
+    slug: 'github',
+    description: 'GitHub repo file access',
+    baseURL: '',
+    isGithub: true,
+    hidden: true,
+  },
   {
     name: 'interactive',
     slug: '',
@@ -89,7 +123,7 @@ let fileSystems: FileSystemConfig[] = [
     hidden: true,
   },
 
-  // End. Below here, these are editable:
+  // ----------- End. Below here, these are editable: -------------------
 
   {
     name: 'VSP TU-Berlin',
@@ -100,20 +134,12 @@ let fileSystems: FileSystemConfig[] = [
     skipList: ['episim/battery'],
   },
   {
-    name: 'Berlin Open Scenario v6.3',
+    name: 'Berlin Open Scenario v6',
     slug: 'open-berlin',
     description: 'Standard dashboard from the MATSim SimWrapper contrib',
     thumbnail: 'images/thumb-localfiles.jpg',
     baseURL:
-      'https://svn.vsp.tu-berlin.de/repos/public-svn/matsim/scenarios/countries/de/berlin/berlin-v6.3/output/berlin-v6.3-10pct/',
-    example: true,
-  },
-  {
-    name: 'Visualization Examples',
-    slug: 'examples',
-    description: 'Various SimWrapper data vis types',
-    thumbnail: 'images/thumb-localfiles.jpg',
-    baseURL: 'https://svn.vsp.tu-berlin.de/repos/public-svn/shared/simwrapper',
+      'https://svn.vsp.tu-berlin.de/repos/public-svn/matsim/scenarios/countries/de/berlin/berlin-v6.4/output/berlin-v6.4-10pct/',
     example: true,
   },
   {
@@ -134,6 +160,22 @@ let fileSystems: FileSystemConfig[] = [
       'https://svn.vsp.tu-berlin.de/repos/public-svn/matsim/scenarios/countries/de/berlin/projects/bene/website',
     thumbnail: '/simwrapper/images/thumb-localfiles.jpg',
     hidden: false,
+    example: true,
+  },
+  {
+    name: 'Visualization Examples',
+    slug: 'examples',
+    description: 'Various SimWrapper data vis types',
+    thumbnail: 'images/thumb-localfiles.jpg',
+    baseURL: 'https://svn.vsp.tu-berlin.de/repos/public-svn/shared/simwrapper',
+    example: true,
+  },
+  {
+    name: 'Additional Sample Data',
+    slug: 'sample-data',
+    description: 'Sample data from various cities',
+    thumbnail: 'images/thumb-localfiles.jpg',
+    baseURL: 'https://svn.vsp.tu-berlin.de/repos/public-svn/shared/sample-data',
     example: true,
   },
   {

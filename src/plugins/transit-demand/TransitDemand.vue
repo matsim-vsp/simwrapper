@@ -1,90 +1,92 @@
 <template lang="pug">
-.transit-viz(:class="{'hide-thumbnail': !thumbnail}")
+  .transit-viz(:class="{'hide-thumbnail': !thumbnail}")
 
-  //- @mousemove.stop
-  .main-layout(v-if="!thumbnail"
-    @mousemove="dividerDragging"
-    @mouseup="dividerDragEnd"
-  )
-    .dragger(
-      @mousedown="dividerDragStart"
+    //- @mousemove.stop
+    .main-layout(v-if="!thumbnail"
+      @mousemove="dividerDragging"
       @mouseup="dividerDragEnd"
-      @mousemove.stop="dividerDragging"
     )
+      .dragger(
+        @mousedown="dividerDragStart"
+        @mouseup="dividerDragEnd"
+        @mousemove.stop="dividerDragging"
+      )
 
-    .map-container(:class="{'hide-thumbnail': !thumbnail }" oncontextmenu="return false")
+      .map-container(:class="{'hide-thumbnail': !thumbnail }" oncontextmenu="return false")
 
-        transit-layers.map-styles(v-if="transitLinks?.features.length"
-          :viewId="viewId"
-          :links="transitLinks"
-          :selectedFeatures="selectedFeatures"
-          :stopMarkers="stopMarkers"
-          :handleClickEvent="handleMapClick"
-          :pieSlider="pieSlider"
-          :widthSlider="widthSlider"
-        )
-
-        .width-sliders.flex-row(v-if="transitLines.length" :style="{backgroundColor: isDarkMode ? '#00000099': '#ffffffaa'}")
-            //- width slider
-            img.icon-blue-ramp(:src="icons.blueramp")
-            b-slider.pie-slider(type="is-success" :tooltip="false" size="is-small"  v-model="widthSlider")
-            //- pie slider
-            img.icon-pie-slider(v-if="cfDemand1" :src="icons.piechart")
-            b-slider.pie-slider(v-if="cfDemand1" type="is-success" :tooltip="false" size="is-small"  v-model="pieSlider")
-
-        zoom-buttons
-
-        .status-corner(v-if="loadingText")
-          p {{ loadingText }}
-          b-progress.load-progress(v-if="loadProgress > 0"
-            :value="loadProgress" :rounded="false" type='is-success')
-
-    .right-panel-holder(:style="{width: `${legendSectionWidth}px`}")
-
-      .right-side-column
-
-        p(style="margin-top: 0.25rem")
-          b TRANSIT INSPECTOR
-
-        .panel-item(v-if="metrics.length > 1")
-          .metric-buttons
-            button.button.is-small.metric-button(
-              v-for="metric,i in metrics" :key="metric.field"
-              :style="{'color': activeMetric===metric.field ? 'white' : buttonColors[i], 'border': `1px solid ${buttonColors[i]}`, 'background-color': activeMetric===metric.field ? buttonColors[i] : isDarkMode ? '#333':'white'}"
-              @click="handleClickedMetric(metric)") {{ $i18n.locale === 'de' ? metric.name_de : metric.name_en }}
-
-        //- p(v-if="transitLines.length" style="margin: 0.75rem 0 0rem 0"): b LINES AND ROUTES
-
-        b-input.searchbox(v-if="transitLines.length"
-          v-model="searchText" style="padding: 0rem 0.5rem 0.75rem 0" size="is-small" placeholder="Search line ID..."
-        )
-
-        .transit-lines.flex-col.flex1
-
-          lazy-list.flex1(
-            :highlightedTransitLines="highlightedTransitLines"
-            :listProps="routeListProps"
+          transit-layers.map-styles(v-if="transitLinks?.features.length"
+            :viewId="viewId"
+            :links="transitLinks"
+            :selectedFeatures="selectedFeatures"
+            :stopMarkers="stopMarkers"
+            :handleClickEvent="handleMapClick"
+            :pieSlider="pieSlider"
+            :widthSlider="widthSlider"
+            :transitLines="activeTransitLines"
+            :vizDetails="vizDetails"
           )
 
-        .summary-stats.flex-col
-          .sum-stat-title: b SUMMARY STATISTICS
-          p(:style="{visibility: selectedRouteIds.length ? 'visible' : 'hidden'}")
-            b {{ selectedRouteIds.length }}
-            | &nbsp; selected route{{ selectedRouteIds.length != 1 ? 's':''}}
-          .flex-row(:style="{visibility: selectedRouteIds.length ? 'visible':'hidden', gap: '0.5rem'}")
-            .aa
-              b {{ summaryStats.departures }}
-              | &nbsp;Departures
-            .aa(v-if="cfDemand1")
-              b {{ summaryStats.pax }}
-              | &nbsp;Passengers
+          .width-sliders.flex-row(v-if="transitLines.length" :style="{backgroundColor: isDarkMode ? '#00000099': '#ffffffaa'}")
+              //- width slider
+              img.icon-blue-ramp(:src="icons.blueramp")
+              b-slider.pie-slider(type="is-success" :tooltip="false" size="is-small"  v-model="widthSlider")
+              //- pie slider
+              img.icon-pie-slider(v-if="cfDemand1" :src="icons.piechart")
+              b-slider.pie-slider(v-if="cfDemand1" type="is-success" :tooltip="false" size="is-small"  v-model="pieSlider")
 
-        legend-box.legend(v-if="!thumbnail"
-          :rows="legendRows"
-          @click="clickedLegend"
-        )
+          zoom-buttons
 
-</template>
+          .status-corner(v-if="loadingText")
+            p {{ loadingText }}
+            b-progress.load-progress(v-if="loadProgress > 0"
+              :value="loadProgress" :rounded="false" type='is-success')
+
+      .right-panel-holder(:style="{width: `${legendSectionWidth}px`}")
+
+        .right-side-column
+
+          p(style="margin-top: 0.25rem")
+            b TRANSIT INSPECTOR
+
+          .panel-item(v-if="metrics.length > 1")
+            .metric-buttons
+              button.button.is-small.metric-button(
+                v-for="metric,i in metrics" :key="metric.field"
+                :style="{'color': activeMetric===metric.field ? 'white' : buttonColors[i], 'border': `1px solid ${buttonColors[i]}`, 'background-color': activeMetric===metric.field ? buttonColors[i] : isDarkMode ? '#333':'white'}"
+                @click="handleClickedMetric(metric)") {{ $i18n.locale === 'de' ? metric.name_de : metric.name_en }}
+
+          //- p(v-if="transitLines.length" style="margin: 0.75rem 0 0rem 0"): b LINES AND ROUTES
+
+          b-input.searchbox(v-if="transitLines.length"
+            v-model="searchText" style="padding: 0rem 0.5rem 0.75rem 0" size="is-small" placeholder="Search line ID or /regex/"
+          )
+
+          .transit-lines.flex-col.flex1
+
+            lazy-list.flex1(
+              :highlightedTransitLines="highlightedTransitLines"
+              :listProps="routeListProps"
+            )
+
+          .summary-stats.flex-col
+            .sum-stat-title: b SUMMARY STATISTICS
+            p(:style="{visibility: selectedRouteIds.length ? 'visible' : 'hidden'}")
+              b {{ selectedRouteIds.length }}
+              | &nbsp; selected route{{ selectedRouteIds.length != 1 ? 's':''}}
+            .flex-row(:style="{visibility: selectedRouteIds.length ? 'visible':'hidden', gap: '0.5rem'}")
+              .aa
+                b {{ summaryStats.departures }}
+                | &nbsp;Departures
+              .aa(v-if="cfDemand1")
+                b {{ summaryStats.pax }}
+                | &nbsp;Passengers
+
+          legend-box.legend(v-if="!thumbnail"
+            :rows="legendRows"
+            @click="clickedLegend"
+          )
+
+  </template>
 
 <script lang="ts">
 const i18n = {
@@ -138,6 +140,16 @@ import IconBlueRamp from './assets/icon-blue-ramp.png'
 const DEFAULT_PROJECTION = 'EPSG:31468' // 31468' // 2048'
 const COLOR_CATEGORIES = 10
 const SHOW_STOPS_AT_ZOOM_LEVEL = 11
+
+interface PtData {
+  name: string
+  a: number
+  b: number
+}
+
+interface StopLevelData {
+  [ptLine: string]: PtData | number
+}
 
 const DEFAULT_ROUTE_COLORS = [
   // ---------------------------------------------------
@@ -343,8 +355,8 @@ const MyComponent = defineComponent({
       _transitFetcher: {} as any,
       _transitHelper: {} as any,
 
-      pieSlider: 30,
-      widthSlider: 50,
+      pieSlider: 20,
+      widthSlider: 20,
 
       resolvers: {} as { [id: number]: any },
       resolverId: 0,
@@ -356,7 +368,13 @@ const MyComponent = defineComponent({
       cfDemandStop1: null as crossfilter.Dimension<any, any> | null,
       cfDemandStop2: null as crossfilter.Dimension<any, any> | null,
 
-      stopLevelDemand: {} as { [id: string]: { b: number; a: number } },
+      stopLevelDemand: {} as {
+        [id: string]: {
+          b: number
+          a: number
+          ptLines: { [ptLineId: string]: { name: string; b: number; a: number } }
+        }
+      },
 
       routeColors: [] as { match: any; color: string; label: string; hide: boolean }[],
       usedLabels: [] as string[],
@@ -426,13 +444,15 @@ const MyComponent = defineComponent({
         lines[route.lineId].routes.push(route)
       })
 
+      if (!this.selectedLinkId) return lines
+
       // fetch demand data for these links
       const demandLookup = {} as { [routeId: string]: any[] }
 
       this.cfDemandStop1?.filterAll()
       this.cfDemandStop2?.filterAll()
 
-      this.cfDemandLink1?.filter(this.selectedLinkId)
+      this.cfDemandLink1?.filter((id: any) => id.indexOf(this.selectedLinkId) > -1)
       let demandData = this.cfDemand1?.allFiltered()
       if (demandData) {
         demandData.forEach(row => {
@@ -440,7 +460,7 @@ const MyComponent = defineComponent({
           demandLookup[row.transitRoute].push(row)
         })
       }
-      this.cfDemandLink2?.filter(this.selectedLinkId)
+      this.cfDemandLink2?.filter((id: any) => id.indexOf(this.selectedLinkId) > -1)
       demandData = this.cfDemand2?.allFiltered()
       if (demandData) {
         demandData.forEach(row => {
@@ -614,19 +634,33 @@ const MyComponent = defineComponent({
         return
       }
 
-      let foundRoutes = Object.keys(this.routeData).filter(
-        routeID => routeID.toLocaleLowerCase().indexOf(searchTerm) > -1
-      )
+      let foundRoutes = [] as any[]
+      let foundLines = [] as any[]
+      let regexp
+
+      // user provided /regex/ ?
+      if (searchTerm.startsWith('/') && searchTerm.endsWith('/')) {
+        const regexTerm = this.searchText.slice(1, this.searchText.length - 1)
+        regexp = new RegExp(regexTerm, 'gu') // global, unicode
+      }
+
+      if (regexp) {
+        foundRoutes = Object.keys(this.routeData).filter(routeID => routeID.match(regexp))
+        foundLines = this.transitLines.filter(line => line.id.match(regexp)).map(line => line.id)
+      } else {
+        foundRoutes = Object.keys(this.routeData).filter(
+          routeID => routeID.toLocaleLowerCase().indexOf(searchTerm) > -1
+        )
+        foundLines = this.transitLines
+          .filter(line => line.id.toLocaleLowerCase().indexOf(searchTerm) > -1)
+          .map(line => line.id)
+      }
 
       // show selected route snakepaths
       this.routesOnLink = foundRoutes.map(id => this.routeData[id])
       this.highlightAllAttachedRoutes()
 
       // show found lines in list
-      const foundLines = this.transitLines
-        .filter(line => line.id.toLocaleLowerCase().indexOf(searchTerm) > -1)
-        .map(line => line.id)
-
       this.highlightedTransitLineIds = new Set(foundLines)
       this.selectedRouteIds = this.routesOnLink.map(route => route.id)
     },
@@ -698,11 +732,15 @@ const MyComponent = defineComponent({
 
       let network = this.vizDetails.network
       // First see if we have an avro network
+      // network.includes(".avro")
       if (!network) {
         const avroNetworkFiles = files
           .filter(f => f.toLocaleLowerCase().endsWith('.avro'))
           .filter(f => f.toLocaleLowerCase().indexOf('network') > -1)
-        if (avroNetworkFiles.length) network = avroNetworkFiles[0]
+        if (avroNetworkFiles.length) {
+          console.log('avro network found')
+          network = avroNetworkFiles[0]
+        }
         if (avroNetworkFiles.length > 1)
           console.warn('MULTIPLE Avro files found - using first of ', avroNetworkFiles)
       }
@@ -719,16 +757,23 @@ const MyComponent = defineComponent({
           network = ''
         }
       }
-
-      // Departures: use them if we are in an output folder (and they exist)
+      // Demand: use them if we are in an output folder (and they exist)
       let demandFiles = [] as string[]
       if (this.myState.yamlConfig.indexOf('output_transitSchedule') > -1) {
-        demandFiles = files.filter(f => f.endsWith('pt_stop2stop_departures.csv.gz'))
+        try {
+          const analysisPtFolder = await this.fileApi.getDirectory(
+            `${this.myState.subfolder}/analysis/pt/`
+          )
+          demandFiles = analysisPtFolder.files.filter(f => f.includes('pt_pax_volumes.'))
+        } catch (e) {
+          // we can skip pax loads if file not found
+          console.warn('error', '' + e)
+        }
       }
 
       // Save everything
       this.vizDetails.network = network
-      if (demandFiles.length) this.vizDetails.demand = demandFiles[0]
+      if (demandFiles.length) this.vizDetails.demand = `analysis/pt/${demandFiles[0]}`
     },
 
     async guessProjection(networks: any): Promise<string> {
@@ -881,13 +926,13 @@ const MyComponent = defineComponent({
         let width = 1
         switch (this.activeMetric) {
           case 'departures':
-            width = link.properties.departures * 0.025
+            width = link.properties.departures
             break
           case 'pax':
-            width = link.properties.pax * 0.001
+            width = link.properties.pax
             break
           case 'loadfac':
-            width = link.properties.loadfac * 150
+            width = link.properties.loadfac * 10000
             break
         }
         link.properties.width = width
@@ -932,11 +977,16 @@ const MyComponent = defineComponent({
 
     async loadEverything() {
       const networks = await this.loadNetworks()
-      const projection = await this.guessProjection(networks)
-      this.vizDetails.projection = projection
-      this.projection = this.vizDetails.projection
+      if (!networks) return
 
-      if (networks) this.processInputs(networks)
+      const projection = await this.guessProjection(networks)
+      this.projection = projection
+
+      // comment this for now; this is what the user really asked for: NOT A GUESS.
+      // this.vizDetails.projection = projection
+
+      this.processInputs(networks)
+      // console.log(networks)
 
       // TODO remove for now until we research whether this causes a memory leak:
       // this.setupKeyListeners()
@@ -1056,7 +1106,7 @@ const MyComponent = defineComponent({
         return { roadXML: results[0], transitXML: results[1], ridership: [] }
       } catch (e) {
         console.error('TRANSIT:', e)
-        this.loadingText
+        this.loadingText = ''
         this.$emit('error', '' + e)
         return null
       }
@@ -1113,7 +1163,7 @@ const MyComponent = defineComponent({
       this.incrementLoadProgress()
 
       const numericCols = [
-        'passengersAtAlighting',
+        'passengersAlighting',
         'passengersAtArrival',
         'passengersBoarding',
         'stopSequence',
@@ -1135,95 +1185,56 @@ const MyComponent = defineComponent({
       this.cfDemandLink1 = this.cfDemand1.dimension((d: any) => d.linkIdsSincePreviousStop)
       this.cfDemandLink2 = this.cfDemand2.dimension((d: any) => d.linkIdsSincePreviousStop)
 
-      // stop-level demand
-      const dimStop1 = this.cfDemand1.dimension((d: any) => d.stop)
-      const dimStop2 = this.cfDemand2.dimension((d: any) => d.stop)
+      // // stop-level demand
+      // const dimStop1 = this.cfDemand1.dimension((d: any) => d.stop)
+      // const dimStop2 = this.cfDemand2.dimension((d: any) => d.stop)
+      // const stop1 = dimStop1.group()
+      // const stop2 = dimStop2.group()
 
-      const stop1 = dimStop1.group()
-      const stop2 = dimStop2.group()
-      stop1
-        .reduceSum((d: any) => d.passengersBoarding)
-        .all()
-        .map(row => {
-          if (Number.isFinite(row.value))
-            this.stopLevelDemand[row.key as any] = { b: row.value as number, a: 0 }
-        })
-      stop2
-        .reduceSum((d: any) => d.passengersBoarding)
-        .all()
-        .map(row => {
-          if (!this.stopLevelDemand[row.key as any])
-            this.stopLevelDemand[row.key as any] = { b: 0, a: 0 }
-          if (Number.isFinite(row.value))
-            this.stopLevelDemand[row.key as any].b += row.value as number
-        })
-      stop1
-        .reduceSum((d: any) => d.passengersAlighting)
-        .all()
-        .map(row => {
-          if (!this.stopLevelDemand[row.key as any])
-            this.stopLevelDemand[row.key as any] = { b: 0, a: 0 }
-          if (Number.isFinite(row.value))
-            this.stopLevelDemand[row.key as any].a += row.value as number
-        })
-      stop2
-        .reduceSum((d: any) => d.passengersAlighting)
-        .all()
-        .map(row => {
-          if (!this.stopLevelDemand[row.key as any])
-            this.stopLevelDemand[row.key as any] = { b: 0, a: 0 }
-          if (Number.isFinite(row.value))
-            this.stopLevelDemand[row.key as any].a += row.value as number
-        })
-      dimStop1.dispose()
-      dimStop2.dispose()
-
+      // make stopLevelDemand a 2-dimensional array? stop ID and then pt-line?
+      for (const row of results.data) {
+        const stopId = row.stop
+        if (!this.stopLevelDemand[stopId]) {
+          this.stopLevelDemand[stopId] = { b: 0, a: 0, ptLines: {} }
+        }
+        this.stopLevelDemand[stopId].b += row.passengersBoarding
+        this.stopLevelDemand[stopId].a += row.passengersAlighting
+        const ptLineId = row.transitLine
+        if (!this.stopLevelDemand[stopId].ptLines[ptLineId])
+          this.stopLevelDemand[stopId].ptLines[ptLineId] = { name: ptLineId, b: 0, a: 0 }
+        this.stopLevelDemand[stopId].ptLines[ptLineId].a += row.passengersAlighting
+        this.stopLevelDemand[stopId].ptLines[ptLineId].b += row.passengersBoarding
+      }
       // build link-level passenger ridership ----------
+      console.log('---Calculating link-by-link pax/cap')
       const linkPassengersById = {} as any
+      const linkCapacity = {} as any
 
-      const group1 = this.cfDemandLink1.group()
-      const group2 = this.cfDemandLink2.group()
-
-      // pax ridership
-      group1
-        .reduceSum((d: any) => d.passengersAtArrival)
-        .all()
-        .map(link => {
-          linkPassengersById[link.key as any] = link.value
-        })
-      group2
-        .reduceSum((d: any) => d.passengersAtArrival)
-        .all()
-        .map(link => {
-          if (!linkPassengersById[link.key as any]) linkPassengersById[link.key as any] = link.value
-          linkPassengersById[link.key as any] += link.value
-        })
-
-      // veh capacities
-      const capacity = {} as any
-      group1
-        .reduceSum((d: any) => d.totalVehicleCapacity)
-        .all()
-        .map(link => {
-          capacity[link.key as any] = link.value
-        })
-      group2
-        .reduceSum((d: any) => d.totalVehicleCapacity)
-        .all()
-        .map(link => {
-          if (!capacity[link.key as any]) capacity[link.key as any] = link.value
-          capacity[link.key as any] += link.value
-        })
+      // loop through rows
+      for (const row of results.data) {
+        // console.log(row)
+        if (row.linkIdsSincePreviousStop) {
+          const traversedLinks = row.linkIdsSincePreviousStop.split(';')
+          for (const linkId of traversedLinks) {
+            // pax
+            if (!linkPassengersById[linkId]) linkPassengersById[linkId] = 0
+            linkPassengersById[linkId] += row.passengersAtArrival
+            // cap
+            if (!linkCapacity[linkId]) linkCapacity[linkId] = 0
+            linkCapacity[linkId] += row.totalVehicleCapacity
+          }
+        }
+      }
 
       // update passenger value in the transit-link geojson.
       for (const transitLink of this.transitLinks.features) {
         if (!transitLink.properties) transitLink.properties = {}
         transitLink.properties['pax'] = linkPassengersById[transitLink.properties.id]
-        transitLink.properties['cap'] = capacity[transitLink.properties.id]
+        transitLink.properties['cap'] = linkCapacity[transitLink.properties.id]
         transitLink.properties['loadfac'] =
           Math.round(
             (1000 * linkPassengersById[transitLink.properties.id]) /
-              capacity[transitLink.properties.id]
+              linkCapacity[transitLink.properties.id]
           ) / 1000
       }
 
@@ -1247,9 +1258,27 @@ const MyComponent = defineComponent({
         this.receivedProcessedTransit(buffer)
       }
 
+      // Transit schedule: this might have a different projection than the network,
+      // because Avro networks are always EPSG:4326 even if original network is not.
+      let transitProjection = this.vizDetails.projection
+      if (!transitProjection) {
+        // see if transit network has its own projection
+        let tCRS = networks?.transitXML?.transitSchedule?.attributes?.attribute
+        // sometimes array, sometimes element.
+        if (!tCRS.length) tCRS = [tCRS]
+        tCRS = tCRS.filter((f: any) => f.name === 'coordinateReferenceSystem')
+        if (tCRS.length) {
+          transitProjection = tCRS[0]['#text']
+        } else {
+          // otherwise use roadnetwork project
+          transitProjection = this.projection
+        }
+      }
+
+      console.log('Transit schedule using', transitProjection)
       this._transitHelper.postMessage({
         xml: networks,
-        projection: this.projection,
+        projection: transitProjection,
       })
     },
 
@@ -1295,7 +1324,12 @@ const MyComponent = defineComponent({
       await this.processDepartures()
 
       // Build the links layer and add it
-      this.transitLinks = await this.constructDepartureFrequencyGeoJson()
+      try {
+        this.transitLinks = await this.constructDepartureFrequencyGeoJson()
+      } catch (e) {
+        const msg = '' + e || 'Failed processing departure links'
+        this.$emit('error', msg)
+      }
       // don't keep the network lying around wasting memory
       this._network = { links: {}, nodes: {} }
       // build the lookup for transit links by linkId
@@ -1419,6 +1453,9 @@ const MyComponent = defineComponent({
         }
       }
 
+      if (!geojson.length) {
+        throw Error('No links found. Does the network contain PT links?')
+      }
       return { type: 'FeatureCollection', features: geojson } as GeoJSON.FeatureCollection
     },
 
@@ -1600,7 +1637,7 @@ const MyComponent = defineComponent({
             bearing,
             xy: [startFacility.x, startFacility.y],
             name: startFacility.name || '',
-            id: startFacility.id || '',
+            id: stop.refId || '', // startFacility.id || '',
             linkRefId: startFacility.linkRefId || '',
           } as any
 
@@ -1610,13 +1647,14 @@ const MyComponent = defineComponent({
             if (ridership) {
               marker.boardings = ridership.b
               marker.alightings = ridership.a
+              marker.ptLines = ridership.ptLines
             }
           }
 
           // merge stop-level stats for routes that share the same stop
           if (marker.id in markers) {
-            markers[marker.id].boardings += marker.boardings
-            markers[marker.id].alightings += marker.alightings
+            markers[marker.id].boardings = marker.boardings // +=
+            markers[marker.id].alightings = marker.alightings // +=
           } else {
             markers[marker.id] = marker
           }
@@ -1788,7 +1826,9 @@ const MyComponent = defineComponent({
 
     if (this.thumbnail) return
 
-    await this.findInputFiles()
+    // If we don't have a network file yet, try and find one
+    if (!this.vizDetails.network) await this.findInputFiles()
+
     this.loadEverything()
   },
 
@@ -1803,8 +1843,6 @@ const MyComponent = defineComponent({
     this.$store.commit('setFullScreen', false)
   },
 })
-
-const _colorScale = colormap({ colormap: 'viridis', nshades: COLOR_CATEGORIES })
 
 export default MyComponent
 </script>
@@ -1934,6 +1972,7 @@ h3 {
   from {
     transform: translateX(-100%);
   }
+
   to {
     transform: translateX(0);
   }
@@ -2155,6 +2194,7 @@ h3 {
   flex-direction: column;
   background-color: var(--bgCardFrame);
   border: 1px solid #88888844;
+
   .description {
     margin-top: 0.5rem;
   }
@@ -2176,6 +2216,7 @@ h3 {
     font-size: 1.1rem;
     margin: 1px;
   }
+
   .stats {
     gap: 0.5rem;
     background-color: var(--bgPanel3);

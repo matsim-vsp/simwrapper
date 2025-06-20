@@ -138,15 +138,15 @@ export default class DashboardDataManager {
       const withTimeout = (promise: Promise<any>, timeout: number) => {
         const timeoutPromise = new Promise((_, reject) => {
           setTimeout(() => {
-            reject(new Error(`Operation timed out after ${timeout}ms`))
-          }, timeout)
+            reject(new Error(`Operation timed out after ${timeout}s`))
+          }, timeout * 1000)
         })
         return Promise.race([promise, timeoutPromise])
       }
 
       // wait for dataset to load
       // this will immediately return dataset if it is already loaded
-      let myDataset = await withTimeout(this.datasets[cacheKey].dataset, 60 * 1000)
+      let myDataset = await withTimeout(this.datasets[cacheKey].dataset, 60)
 
       let { _comments, ...allRows } = myDataset
       let comments = _comments as unknown as string[]
@@ -396,12 +396,17 @@ export default class DashboardDataManager {
   }
 
   public addFilterListener(config: { dataset: string; subfolder: string }, listener: any) {
+    try {
+
     const cacheKey = `${config.subfolder || this.subfolder}/${config.dataset}`
     const selectedDataset = this.datasets[cacheKey]
     if (!selectedDataset) throw Error(`Can't add listener, no dataset named: ` + cacheKey)
 
     this.datasets[cacheKey].filterListeners.add(listener)
+  } catch (e) {
+    console.error('CANT ADD FILTER LISTENER' + e)
   }
+}
 
   public removeFilterListener(config: { dataset: string; subfolder: string }, listener: any) {
     const cacheKey = `${config.subfolder || this.subfolder}/${config.dataset}`
