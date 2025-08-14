@@ -20,6 +20,15 @@ export const MAP_STYLES_OFFLINE = {
   transparentDark: { version: 8, layers: [], sources: {} },
 }
 
+export const XML_COMPONENTS = {
+  carriers: 'carriers',
+  config: 'xml',
+  events: 'events',
+  lsps: 'logistics',
+  network: 'area-map',
+  transitSchedule: 'transit',
+} as any
+
 export interface NavigationItem {
   text?: string
   text_en?: string
@@ -158,7 +167,7 @@ export interface FileSystemConfig {
   handle?: FileSystemAPIHandle
   example?: boolean
   isGithub?: boolean
-  omx?: boolean // supports OMX open matrix API - see https://github.com/simwrapper/omx-server
+  flask?: boolean // Flask filesystem supports OMX open matrix API - see https://github.com/simwrapper/omx-server
 }
 
 export interface VisualizationPlugin {

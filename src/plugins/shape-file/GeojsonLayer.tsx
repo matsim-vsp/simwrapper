@@ -34,14 +34,17 @@ export default function Component({
   redraw = 0,
   featureFilter = new Float32Array(0),
   cbTooltip = null as any,
+  cbClickEvent = {} as any,
   bgLayers = {} as { [name: string]: BackgroundLayer },
-  handleClickEvent = {} as any,
   highlightedLinkIndex = -1 as number,
   dark = false,
   isRGBA = false,
   features = [] as any[],
+  mapIsIndependent = false,
+  initialView = null,
+  isAtlantis = false,
 }) {
-  const [viewState, setViewState] = useState(globalStore.state.viewState)
+  const [viewState, setViewState] = useState(initialView || globalStore.state.viewState)
   const [screenshotCount, setScreenshot] = useState(screenshot)
 
   const _mapRef = useRef<MapRef>() as any
@@ -55,27 +58,6 @@ export default function Component({
   REACT_VIEW_HANDLES[viewId] = () => {
     setViewState(globalStore.state.viewState)
   }
-
-  // console.log(featureFilter)
-
-  // Feature setter hack:
-  // Using the array itself causes an enormous memory leak. I am not sure why
-  // Vue/React/Deck.gl are not managing this array correctly. Surely the problem
-  // is in our code, not theirs? But I spent days trying to find it.
-  // Anyway, making this deep copy of the feature array seems to solve it.
-
-  // REACT_VIEW_HANDLES[1000 + viewId] = (features: any[]) => {
-  //   const fullCopy = features.map(feature => {
-  //     const f = {
-  //       type: '' + feature.type,
-  //       geometry: JSON.parse(JSON.stringify(feature.geometry)),
-  //       properties: JSON.parse(JSON.stringify(feature?.properties || {})),
-  //     } as any
-  //     if ('id' in feature) f.id = '' + feature.id
-  //     return f
-  //   })
-  //   setFeatures(fullCopy)
-  // }
 
   // SCREENSHOT -----------------------------------------------------------------------
   let isTakingScreenshot = screenshot > screenshotCount
@@ -108,6 +90,7 @@ export default function Component({
   }
 
   const isStroked = !!lineColors && lineWidths !== 0
+  const hasBackgroundMap = !isAtlantis
 
   // LINE COLORS ----------------------------------------------------------------------
   let cbLineColor // can be callback OR a plain string in simple mode
@@ -168,7 +151,8 @@ export default function Component({
     if (!view.latitude) return
     view.center = [view.longitude, view.latitude]
     setViewState(view)
-    globalStore.commit('setMapCamera', view)
+
+    if (!mapIsIndependent) globalStore.commit('setMapCamera', view)
   }
 
   // CLICK  ---------------------------------------------------------------------
@@ -176,13 +160,16 @@ export default function Component({
     // console.log('click!')
     // console.log(event)
     // TODO: send click event to parent
-    if (handleClickEvent) handleClickEvent(event)
+    if (cbClickEvent) cbClickEvent(event)
   }
 
   // TOOLTIP ------------------------------------------------------------------
   function getTooltip({ object, index }: { object: any; index: number }) {
     let offset = index
-    if (object && 'feature_idx' in object) offset = object.feature_idx
+    if (object && 'feature_idx' in object) {
+      offset = object.feature_idx
+    }
+    // always call this even if we're blank so tooltip goes away
     if (cbTooltip) cbTooltip(offset, object)
   }
 
@@ -376,6 +363,9 @@ export default function Component({
         getSourcePosition: (d: any) => d.path[0],
         getTargetPosition: (d: any) => d.path[1],
         pickable: true,
+        autoHighlight: true,
+        highlightedObjectIndex: highlightedLinkIndex == -1 ? null : highlightedLinkIndex,
+        highlightColor: [255, 0, 204, 255],
         opacity: 1,
         widthUnits: 'pixels',
         widthMinPixels: 1,
@@ -430,11 +420,10 @@ export default function Component({
         }
       }}
     >
-      {
-        /*
-        // @ts-ignore */
+      {hasBackgroundMap && (
+        /* @ts-ignore */
         <StaticMap mapStyle={globalStore.getters.mapStyle} mapboxApiAccessToken={MAPBOX_TOKEN} />
-      }
+      )}
     </DeckGL>
   )
 

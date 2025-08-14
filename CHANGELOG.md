@@ -2,19 +2,67 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.1.1](https://github.com/simwrapper/simwrapper/compare/v4.1.0...v4.1.1) (2025-08-14)
+
+
+### Bug Fixes
+
+* **hexagons:** Big performance increase on large datasets ([0d05446](https://github.com/simwrapper/simwrapper/commit/0d05446e8cac54d22bf5598de9f26d5c324fcdfd))
+* **hexagons:** filter 0-values reliably, and only use one worker if dataset is small ([0285b7e](https://github.com/simwrapper/simwrapper/commit/0285b7e021e1270ef908b93977c4fce709262ae9))
+
+## [4.1.0](https://github.com/simwrapper/simwrapper/compare/v4.0.6...v4.1.0) (2025-08-10)
+
+
+### Features
+
+* Gamepad map pan/zoom support ([c7a590c](https://github.com/simwrapper/simwrapper/commit/c7a590c4a50eb1f35a32ab9be8580c554a7c0ac3))
+
+
+### Bug Fixes
+
+* **data:** Make sure background data workers are ready before sending them data ([26cd60a](https://github.com/simwrapper/simwrapper/commit/26cd60add28f8a73ba71d800d20eab6ad3c87011))
+* **hexagons:** Improve xy-hexagon performance with large datasets ([bfa80a6](https://github.com/simwrapper/simwrapper/commit/bfa80a64ecf02112ddc137d7845161971b654f1d))
+* **links:** link map not loading MATSIM XML networks ([25e300e](https://github.com/simwrapper/simwrapper/commit/25e300eda6dfad2f8215829aa19c9a1fff904d3a))
+* probe XML filetypes if filenames are not standard *.output_network.xml ([17e60bb](https://github.com/simwrapper/simwrapper/commit/17e60bb1900278ffff47fb915c7ef75113090850))
+* **transit:** load atlantis transit network correctly ([444bbd4](https://github.com/simwrapper/simwrapper/commit/444bbd44002d48f2dd450bc45e5fe366c1cf4aca))
+
+### [4.0.6](https://github.com/simwrapper/simwrapper/compare/v4.0.5...v4.0.6) (2025-07-30)
+
+
+### Bug Fixes
+
+* back button from individual vizes should return to files view ([b7ab059](https://github.com/simwrapper/simwrapper/commit/b7ab059f728a9ecaf4154070a9b679e9bdba4b9d)), closes [#342](https://github.com/simwrapper/simwrapper/issues/342)
+* don't access Google Fonts (breaks offline mode, slow, spying) ([d4d310b](https://github.com/simwrapper/simwrapper/commit/d4d310b372a69ec33aafe3bc73350a64833d877c))
+* **events:** flask app is not streaming large local files (events, xy-time) ([9e7deb8](https://github.com/simwrapper/simwrapper/commit/9e7deb845ea75c8b58b7fa50df072547f0be5d06)), closes [#479](https://github.com/simwrapper/simwrapper/issues/479)
+* **map:** Legend should display precise user-specified manual breakpoints if given ([d4493fd](https://github.com/simwrapper/simwrapper/commit/d4493fd0fd6c9cbfa9a842a1a863b1ab7bad3301))
+* **map:** Load XML networks better and without crashing ([#489](https://github.com/simwrapper/simwrapper/issues/489)) ([27a024f](https://github.com/simwrapper/simwrapper/commit/27a024f2c5f3efdf8a88131a189e634486bf1f40)), closes [#422](https://github.com/simwrapper/simwrapper/issues/422) [#477](https://github.com/simwrapper/simwrapper/issues/477)
+* **map:** Remove background map for Atlantis coordinates ([2994277](https://github.com/simwrapper/simwrapper/commit/299427702219941f71f0d15e62c327d7c5f09484))
+* ui cleanup with improved breadcrumbs and fixed split-panel layout ([4901485](https://github.com/simwrapper/simwrapper/commit/49014856287b59113f7376117fffc9cbc6be3244))
+* **xml:** XML parser failed to parse some files with DOCTYPE headers ([039d4e9](https://github.com/simwrapper/simwrapper/commit/039d4e931dbc15c9083b94ed34f2925c2a94b903))
+
+### [4.0.5](https://github.com/simwrapper/simwrapper/compare/v4.0.4...v4.0.5) (2025-07-07)
+
+
+### Bug Fixes
+
+* **map:** implement missing "mapIsIndependent" for shapefiles/geojson/networks ([e1248e8](https://github.com/simwrapper/simwrapper/commit/e1248e841d0206ab805d9fb6deeba72a8989ac4f)), closes [#258](https://github.com/simwrapper/simwrapper/issues/258)
+* **map:** map stops displaying tooltip when user clicks on some links ([86a2bf0](https://github.com/simwrapper/simwrapper/commit/86a2bf046a441675c41f534d8887dc6bbbfb7239)), closes [#484](https://github.com/simwrapper/simwrapper/issues/484)
+* **map:** Shapefile tooltips now linger correctly on hover with editable columns, highlight ([1ba8e9b](https://github.com/simwrapper/simwrapper/commit/1ba8e9bea18b65380c2230b21713e7c623263b30)), closes [#484](https://github.com/simwrapper/simwrapper/issues/484)
+* **map:** tooltips based on datasets should appear correctly ([3ea2348](https://github.com/simwrapper/simwrapper/commit/3ea2348e19260adf1e1c94958b3ceaefaaa8cf8b)), closes [#289](https://github.com/simwrapper/simwrapper/issues/289)
+
 ### [4.0.4](https://github.com/simwrapper/simwrapper/compare/v4.0.3...v4.0.4) (2025-07-04)
 
 
 ### Bug Fixes
 
 * **aggregate-od:** link IDs with leading zeroes now processed correctly ([74b8655](https://github.com/simwrapper/simwrapper/commit/74b8655735892db0ae7b6470fe768f26a4f0e7f3))
-* Area map using avro-format network doesn't link to CSV data files ([b597ba8](https://github.com/simwrapper/simwrapper/commit/b597ba8795ed9347443acd1fd9e34e3de11df412)), closes [#425](https://github.com/simwrapper/simwrapper/issues/425)
+* **map** Area map using avro-format network doesn't link to CSV data files ([b597ba8](https://github.com/simwrapper/simwrapper/commit/b597ba8795ed9347443acd1fd9e34e3de11df412)), closes [#425](https://github.com/simwrapper/simwrapper/issues/425)
 * **hexagons:** hexes should not shift on the map when orig/dest is toggled ([dc955e8](https://github.com/simwrapper/simwrapper/commit/dc955e8d62d60e8f248325bafdfe27822ff0be24)), closes [#330](https://github.com/simwrapper/simwrapper/issues/330)
 * **map:** add missing "None" option to LineColor ([1e95301](https://github.com/simwrapper/simwrapper/commit/1e9530188d5efae224df1b2f69189d0715d1558f)), closes [#307](https://github.com/simwrapper/simwrapper/issues/307)
 * **map:** shapefile/network filters were disabled; fixed now (dataset filters TBA) ([9ece2a3](https://github.com/simwrapper/simwrapper/commit/9ece2a36a155dac0e055490a2c078ac12205b255)), closes [#423](https://github.com/simwrapper/simwrapper/issues/423)
 * **matrix:** Export function now exports 1-based CSV with row/col headers ([8470b65](https://github.com/simwrapper/simwrapper/commit/8470b659430ebf14c1f470276f7dd97b23bf8e96)), closes [#470](https://github.com/simwrapper/simwrapper/issues/470)
 * **matrix:** sort matrix row/col data by various columns; and selectable ([13c27c0](https://github.com/simwrapper/simwrapper/commit/13c27c0056a401b3c13ca63b2d0365a0257c4128)), closes [#483](https://github.com/simwrapper/simwrapper/issues/483)
-* simwrapper slow is very slow on Windows 11 / IPv6 connected machines ([bf5d700](https://github.com/simwrapper/simwrapper/commit/bf5d7006c76ba19c8ba666cb6ba0244bf18d6fc9)), closes [#410](https://github.com/simwrapper/simwrapper/issues/410)
+* simwrapper serve is very slow on Windows 11 / IPv6 connected machines ([bf5d700](https://github.com/simwrapper/simwrapper/commit/bf5d7006c76ba19c8ba666cb6ba0244bf18d6fc9)), closes [#410](https://github.com/simwrapper/simwrapper/issues/410)
 * **transit:** side panel number of departures displays zero when a route is selected but no link is selected ([5af1346](https://github.com/simwrapper/simwrapper/commit/5af1346d000a6453fea5d82affea1c96c998ce5d))
 * **transit:** Very large (RVR) pax data files would not load due to silent out-of-memory error ([50983a1](https://github.com/simwrapper/simwrapper/commit/50983a141d96e8a327c8ea5fdcdacbf6aa7e2aa9))
 * **video:** video player config now in sync with simwrapper contrib ([722165c](https://github.com/simwrapper/simwrapper/commit/722165c2a0268e722dcc7e6fff5d7bd96f832de5))
@@ -52,16 +100,24 @@ All notable changes to this project will be documented in this file. See [standa
 
 ## 4.0.0 (2025-06-10)
 
-Bump to version 4.0. New front page, file view, color scheme, event viewer (beta), map builder
-(beta), and updated Python (pip) package for running standalone or in server environments.
+Bump to version 4.0. New look and feel for main page and file browsers should help you find your file and folders faster. All the same info, just better organized.
 
+New front page, file view, color scheme, event viewer (beta), map builder
+(beta), and updated Python (pip) package for running standalone or in server environments.
 
 ### Features
 
+* New front page, file view, and color scheme for easier navigation based on user testing and feedback
+* Event viewer (beta) -- event files can be directly opened to see vehicle animations (WIP)
+* Map builder (beta) -- layered map is starting to become useful with geojson, point, and arc views.
+  WIP, more to come!
+* Updated [uv tool](https://docs.astral.sh/uv)/python/pip simwrapper **command line tool** makes it much easier to run simwrapper locally and view
+  local or network-mounted files. Try `uv tool install simwrapper` and `simwrapper run`. See [running SimWrapper locally](https://docs.simwrapper.app/docs/intro/running-locally) and [cloud storage docs](https://docs.simwrapper.app/docs/guide-cloud-storage) 
+* Updated Docker image, you can run SimWrapper locally with `docker pull simwrapper/app`. See [running SimWrapper locally](https://docs.simwrapper.app/docs/intro/running-locally) 
 * Gridmap Diff Mode ([#468](https://github.com/simwrapper/simwrapper/issues/468)) ([611a825](https://github.com/simwrapper/simwrapper/commit/611a8251a3cd3826b8113b73ba5da19a5bbb9abc))
 
-### [3.7.1](https://github.com/simwrapper/simwrapper/compare/v3.7.0...v3.7.1) (2025-06-11)
 
+### [3.7.1](https://github.com/simwrapper/simwrapper/compare/v3.7.0...v3.7.1) (2025-06-11)
 
 ### Bug Fixes
 

@@ -8,6 +8,7 @@ import HTTPFileSystem from '@/js/HTTPFileSystem'
 import Coords from '@/js/Coords'
 
 import { gUnzip, findMatchingGlobInFiles } from '@/js/util'
+import CoordinateWorker from './CoordinateConverter.worker.ts?worker'
 
 // -----------------------------------------------------------
 onmessage = function (e) {
@@ -16,11 +17,14 @@ onmessage = function (e) {
 // -----------------------------------------------------------
 
 export interface NewRowCache {
-  positions: Float32Array
-  columnIds: string[]
-  coordColumns: number[]
-  column: Uint8Array
-  length: number
+  [group: string]: {
+    positions: Float32Array[]
+    length: number[]
+    // column: Uint8Array
+    columnIds: string[]
+    coordColumns: number[]
+    numAggs: number
+  }
 }
 
 interface Aggregations {
@@ -34,14 +38,9 @@ interface Aggregations {
 let allAggregations: Aggregations = {}
 let totalLines = 0
 let proj = 'EPSG:4326'
+let _workers = [] as any[]
 
-const fullRowCache: NewRowCache = {
-  positions: new Float32Array(0),
-  column: new Uint8Array(0),
-  columnIds: [],
-  coordColumns: [],
-  length: 0,
-}
+let fullRowCache: NewRowCache = {}
 
 /**
  * Begin loading the file, and return status updates
@@ -59,6 +58,7 @@ function startLoading(props: {
   proj = props.projection
 
   postMessage({ status: `Loading ${props.filepath}...` })
+
   step1fetchFile(props.filepath, props.fileSystem)
 }
 
@@ -69,7 +69,12 @@ function startLoading(props: {
  * @returns FullRowCache, ColumnLookup
  */
 function postResults() {
-  postMessage({ fullRowCache }, [fullRowCache.positions.buffer, fullRowCache.column.buffer])
+  const buffers = [] as any
+  Object.values(fullRowCache).forEach(group => {
+    group.positions.forEach(p => buffers.push(p.buffer))
+  })
+
+  postMessage({ fullRowCache }, buffers)
 }
 
 async function step1fetchFile(filepath: string, fileSystem: FileSystemConfig) {
@@ -141,40 +146,55 @@ function step2examineUnzippedData(unzipped: Uint8Array) {
   const startOfData = endOfHeader + 1
   const sections = [] as Uint8Array[]
 
-  let half = Math.floor(unzipped.length / 2)
-  while (half > 0 && unzipped[half] !== 10) {
-    // \n
-    half -= 1
-  }
-
-  // it's possible there is no data in this CSV :eyeroll:
-
-  if (half == 0) {
-    const section1 = unzipped.subarray(startOfData)
-    sections.push(section1)
-  } else {
-    const section1 = unzipped.subarray(startOfData, half)
-    const section2 = unzipped.subarray(half)
-    sections.push(section1)
-    sections.push(section2)
-  }
   // how many lines - count the \n chars
-  // there must be a better way...?
   let count = 0
   for (let i = startOfData; i < unzipped.length; i++) if (unzipped[i] === 10) count++
-
   // might end last line without EOL marker
   if (unzipped[unzipped.length - 1] !== 10) count++
-
   totalLines = count
 
+  // split into sections if there are more than 1000 lines
+  const SECTIONS = count > 1000 ? 4 : 1
+
+  const splitLocs = [] as number[]
+  for (let i = 1; i < SECTIONS; i++) {
+    let half = Math.floor((unzipped.length / SECTIONS) * i)
+    while (half > 0 && unzipped[half] !== 10) {
+      // \n
+      half -= 1
+    }
+    splitLocs.push(half)
+  }
+  if (!splitLocs.length) splitLocs.push(0)
+
+  // it's also possible there is no data in this CSV :eyeroll:
+  if (splitLocs[0] == 0) {
+    sections.push(unzipped.subarray(startOfData))
+  } else {
+    let start = startOfData
+    for (let i = 0; i < splitLocs.length + 1; i++) {
+      const sect = unzipped.slice(start, splitLocs[i] ?? undefined)
+      sections.push(sect)
+      start = splitLocs[i] + 1
+    }
+  }
+
   // only save the relevant columns to save memory and not die
-
-  let numAggregations = 0
-
   for (const group of Object.keys(allAggregations)) {
     const aggregations = allAggregations[group]
     let i = 0
+    let numAggregations = aggregations.length
+
+    fullRowCache[group] = {
+      // 2x points for x/y coords; each Float32Array is for a unique aggregation
+      positions: [], // Array.from({ length: numAggregations }, () => new Float32Array(2 * totalLines)),
+      // column: new Uint8Array(totalLines * numAggregations),
+      length: [], // totalLines,
+      numAggs: numAggregations,
+      columnIds: [],
+      coordColumns: [],
+    }
+
     for (const agg of aggregations) {
       numAggregations++
       const xCol = headerColumns.indexOf(agg.x)
@@ -190,78 +210,83 @@ function step2examineUnzippedData(unzipped: Uint8Array) {
         return
       }
 
-      fullRowCache.columnIds.push(`${group}${i}`)
-      fullRowCache.coordColumns.push(...[xCol, yCol]),
-        // rowCache[] = {
-        //   raw: new Float32Array(count * 2),
-        //   weights: new Float32Array(),
-        //   length: count,
-        // }
-
-        i++
+      fullRowCache[group].columnIds.push(`${group}${i}`)
+      fullRowCache[group].coordColumns.push(...[xCol, yCol])
+      // incr aggr number
+      i++
     }
   }
 
-  // now we know the row count and the number of aggregations, so we can size our arrays
-  fullRowCache.length = count * numAggregations
-  fullRowCache.positions = new Float32Array(2 * count * numAggregations)
-  fullRowCache.column = new Uint8Array(count * numAggregations)
-
-  step3parseCSVdata(sections)
+  step3parseCSVdata(sections, headerColumns)
 }
 
-function step3parseCSVdata(sections: Uint8Array[]) {
-  let offset = 0
-
-  const decoder = new TextDecoder()
+function step3parseCSVdata(sections: Uint8Array[], headerColumns: string[]) {
+  let numActiveWorkers = sections.length
 
   try {
-    for (const section of sections) {
-      const text = decoder.decode(section)
-
-      const numAggregations = fullRowCache.columnIds.length
-      Papa.parse(text, {
-        comments: '#',
-        header: false,
-        // preview: 100,
-        skipEmptyLines: true,
-        delimitersToGuess: ['\t', ';', ',', ' '],
-        dynamicTyping: true,
-        step: (results: any, parser: any) => {
-          if (offset % 65536 === 0) {
-            console.log(offset)
-            postMessage({ status: `Processing CSV: ${Math.floor((100.0 * offset) / totalLines)}%` })
+    for (let i = 0; i < sections.length; i++) {
+      _workers.push(new CoordinateWorker())
+    }
+    for (let i = 0; i < sections.length; i++) {
+      _workers[i].onmessage = (m: MessageEvent) => {
+        if (m.data.error) {
+          postMessage({ error: m.data.error })
+          return
+        }
+        if (m.data.status) {
+          postMessage({ status: m.data.status })
+          return
+        }
+        if (m.data.fullRowCache) {
+          // close this worker
+          _workers[m.data.id].terminate()
+          _workers[m.data.id] = m.data.fullRowCache
+          // last worker? post results!
+          numActiveWorkers -= 1
+          if (!numActiveWorkers) {
+            aggregateResults()
           }
-          for (let agg = 0; agg < numAggregations; agg++) {
-            const wgs84 = Coords.toLngLat(proj, [
-              results.data[fullRowCache.coordColumns[agg * 2] as any],
-              results.data[fullRowCache.coordColumns[1 + agg * 2] as any],
-            ])
-            fullRowCache.positions[offset * 2 * numAggregations + agg * 2] = wgs84[0]
-            fullRowCache.positions[offset * 2 * numAggregations + agg * 2 + 1] = wgs84[1]
-            fullRowCache.column[offset * numAggregations + agg] = agg
-          }
-          offset += 1
-          return results
+        }
+      }
+      _workers[i].postMessage(
+        {
+          id: i,
+          aggregations: allAggregations,
+          projection: proj,
+          header: headerColumns,
+          bytes: sections[i],
         },
-      })
+        [sections[i].buffer]
+      )
     }
   } catch (e) {
     console.log('' + e)
     postMessage({ error: 'ERROR projection coordinates' })
     return
   }
-  postMessage({ status: 'Trimming results...' })
+}
 
-  // now filter zero-cells out: some rows don't have coordinates, and they
-  // will mess up the total calculations
-  // for (const key of Object.keys(rowCache)) {
-  // this is dangerous: only works if BOTH the x and the y are zero; otherwise
-  // it will get out of sync and things will look crazy or crash HAHahahAHHAA
-
-  // rowCache[key].raw = rowCache[key].raw.filter(elem => elem !== 0) // filter zeroes
-  // rowCache[key].length = rowCache[key].raw.length / 2
-  // }
-
+function aggregateResults() {
+  postMessage({ status: 'Merging results...' })
+  // set the array buffers for positions/column values
+  // for all groups and for all workers
+  const groups = Object.keys(fullRowCache)
+  for (const group of groups) {
+    const groupData = fullRowCache[group]
+    for (let agg = 0; agg < groupData.numAggs; agg++) {
+      // figure out length of real data returned by all workers:
+      const totalLength = _workers.reduce((a, w) => a + w[group].length[agg], 0)
+      groupData.positions.push(new Float32Array(2 * totalLength))
+      let offset = 0
+      for (let i = 0; i < _workers.length; i++) {
+        const wData = _workers[i] as NewRowCache
+        const n = wData[group].length[agg]
+        const filledValues = wData[group].positions[agg].slice(0, n * 2)
+        groupData.positions[agg].set(filledValues, offset * 2)
+        offset += n
+      }
+    }
+  }
+  // all done
   postResults()
 }

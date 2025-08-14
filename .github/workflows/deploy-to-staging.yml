@@ -7,7 +7,30 @@ on:
     repository_dispatch:
 
 jobs:
+  # Run playwright e2e tests first:
+  e2e-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: Install dependencies
+        run: cd ${{ github.workspace }} && npm ci
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps
+      - name: Run Playwright tests
+        run: npx playwright test --workers=2
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
+
+  # Ping staging build -IF- tests passed
   notify-staging:
+    needs: e2e-tests
     runs-on: ubuntu-latest
     steps:
       - name: PING staging

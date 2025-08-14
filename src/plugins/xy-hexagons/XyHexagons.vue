@@ -16,9 +16,9 @@
         h3(style="margin-top: -1rem;") {{ $t('areas') }}: {{ hexStats.numHexagons }}, {{ $t('count') }}: {{ hexStats.rows }}
         button.button(style="color: #c0f; border-color: #c0f" @click="handleShowSelectionButton") {{ $t('showDetails') }}
 
-  .control-panel(v-if="isLoaded && !thumbnail && !myState.statusMessage")
-        //- :class="{'is-dashboard': config !== undefined }"
-
+  .control-panel(v-if="isLoaded && !thumbnail && !myState.statusMessage"
+    data-testid="xy-hexagons-control-panel"
+  )
         .panel-item(v-for="group in Object.keys(aggregations)" :key="group")
           p.ui-label {{ group }}
           button.button.is-small.aggregation-button(
@@ -175,6 +175,7 @@ const MyComponent = defineComponent({
       gzipWorker: null as Worker | null,
       colorRamp: colorRamps[0],
       globalState: globalStore.state,
+      currentGroup: '',
       vizDetails: {
         title: '',
         description: '',
@@ -193,7 +194,7 @@ const MyComponent = defineComponent({
         yamlConfig: '',
         thumbnail: false,
       },
-      requests: null as null | NewRowCache,
+      requests: {} as NewRowCache,
       highlightedTrips: [] as any[],
       searchTerm: '',
       searchEnabled: false,
@@ -240,9 +241,10 @@ const MyComponent = defineComponent({
     mapProps(): any {
       return {
         viewId: this.id,
+        group: this.currentGroup,
         agg: this.aggNumber,
         colorRamp: this.colorRamp,
-        coverage: 0.65,
+        coverage: 0.7,
         dark: this.$store.state.isDarkMode,
         data: this.requests,
         extrude: this.extrudeTowers,
@@ -335,16 +337,20 @@ const MyComponent = defineComponent({
       }
 
       // select the anti-view
-      let numAggregations = this.requests?.columnIds.length ?? 0
-      let revAgg = this.aggNumber % 2 ? -1 : 1 // this.aggNumber - 1 : this.aggNumber + 1
+      let revAgg = this.aggNumber + (this.aggNumber % 2 ? -1 : 1) // this.aggNumber - 1 : this.aggNumber + 1
       const arcFilteredRows: any = []
 
       for (const row of pickedObject.object.points) {
         const zoffset = row.index * 2
-        const revoffset = (row.index + revAgg) * 2
 
-        const from = [this.requests?.positions[zoffset], this.requests?.positions[zoffset + 1]]
-        const to = [this.requests?.positions[revoffset], this.requests?.positions[revoffset + 1]]
+        const from = [
+          this.requests[this.currentGroup].positions[revAgg][zoffset],
+          this.requests[this.currentGroup].positions[revAgg][zoffset + 1],
+        ]
+        const to = [
+          this.requests[this.currentGroup].positions[this.aggNumber][zoffset],
+          this.requests[this.currentGroup].positions[this.aggNumber][zoffset + 1],
+        ]
 
         arcFilteredRows.push([from, to])
         this.highlightedTrips = arcFilteredRows
@@ -356,9 +362,8 @@ const MyComponent = defineComponent({
     },
 
     async handleOrigDest(groupName: string, number: number) {
-      const groups = Object.keys(this.aggregations)
-      const groupNumber = groups.indexOf(groupName)
-      this.aggNumber = groupNumber * groups.length + number
+      this.currentGroup = groupName
+      this.aggNumber = number
       this.hexStats = null
       this.multiSelectedHexagons = {}
 
@@ -596,13 +601,14 @@ const MyComponent = defineComponent({
 
         // Sets the map to the specified data
         this.$store.commit('setMapCamera', Object.assign({}, view))
-
         return
       }
 
       // user didn't give us the center, so calculate it
-      const data = this.requests?.positions || []
-      if (!data.length) return
+      const keys = Object.keys(this.requests)
+      if (!keys.length) return
+
+      const data = this.requests[keys[0]].positions[0]
 
       let samples = 0
       let longitude = 0

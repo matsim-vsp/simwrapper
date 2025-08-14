@@ -23,6 +23,9 @@ onmessage = function (e) {
   fetchData(e.data)
 }
 
+// Let main thread know we are alive and listening
+postMessage({ ready: true })
+
 async function fetchData(props: {
   fileSystemConfig: FileSystemConfig
   subfolder: string
@@ -233,7 +236,7 @@ function parseCsvFile(fileKey: string, filename: string, text: string) {
 
   if (!csv.data?.length) {
     console.error('NODATA - Papaparse returned nothing!')
-    throw Error('Bad format or too large? Error loading')
+    throw Error('Bad format, no data, or too large - Error loading')
   }
 
   let headers = csv.meta.fields || []

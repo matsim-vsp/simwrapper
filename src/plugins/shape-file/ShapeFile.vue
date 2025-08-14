@@ -28,19 +28,26 @@
         p(v-if="!legendStore.state?.sections?.length" style="font-size: 1.1rem"): b INFO PANEL
         legend-box(:legendStore="legendStore")
 
-      .tooltip-html(v-if="tooltipHtml && !statusText"
-        v-html="tooltipHtml"
-      )
-        .bglayer-section
+        .bglayer-section.flex-col(v-if="Object.keys(bgLayers).length")
+          h5 Layers
           b-checkbox.simple-checkbox(v-for="layer in Object.keys(bgLayers)" :key="layer"
             @input="updateBgLayers" v-model="bgLayers[layer].visible"
           ) {{  layer }}
 
+      .tooltip-html.flex-col(v-if="tooltipHtml && !statusText"
+        @mouseover="wantToClearTooltip=false" @mouseout="wantToClearTooltip=true"
+      )
+        .the-html(v-html="tooltipHtml")
+        .edit-hint(v-if="tooltipDesiredColumns.length" style="text-align: right;")
+          a(@click="showTooltipConfigurator=true") Show/hide...
+
     .area-map(v-if="!thumbnail" :id="`container-${layerId}`")
 
-      .tooltip-when-no-legend-present(v-if="!showLegend && !statusText && tooltipHtml"
-        v-html="tooltipHtml"
+      .tooltip-when-no-legend-present.flex-col(v-if="!showLegend && !statusText && tooltipHtml"
+        @mouseover="wantToClearTooltip=false" @mouseout="wantToClearTooltip=true"
       )
+        .the-html(v-html="tooltipHtml")
+        a(v-if="tooltipDesiredColumns.length" style="textAlign: right" @click="showTooltipConfigurator=true") Show/hide...
 
       //- drawing-tool.draw-tool(v-if="isLoaded && !thumbnail")
 
@@ -55,19 +62,36 @@
         :opacity="(sliderOpacity / 100) * (sliderOpacity / 100)"
         :pointRadii="dataPointRadii"
         :cbTooltip="cbTooltip"
+        :cbClickEvent="handleClickEvent"
         :bgLayers="bgLayers"
-        :handleClickEvent="handleClickEvent"
         :highlightedLinkIndex="highlightedLinkIndex"
         :redraw="redraw"
         :features="boundaries"
         :dark="globalState.isDarkMode"
         :isRGBA="isRGBA"
+        :mapIsIndependent="vizDetails.mapIsIndependent"
+        :initialView="initialView"
+        :isAtlantis="isAtlantis"
       )
 
       background-map-on-top(v-if="isLoaded && isAreaMode")
 
       //- :features="useCircles ? centroids: boundaries"
       //- background-map-on-top(v-if="isLoaded")
+
+      //- TOOLTIP MODAL SELECTOR
+      .modal.modal-tooltip-picker.flex-col(v-if="showTooltipConfigurator"
+        @mouseover="wantToClearTooltip=false"
+      )
+        h4 Configure tooltips
+        p(style="margin: 0.5rem auto 0 0.75rem;") Select feature columns to be displayed in default tooltips.
+        .flex-row(style="margin: 0.25rem auto 0 0.75rem;gap: 0.25rem;")
+          b-button.is-small(type="is-link" outlined @click="setDesiredTooltipsNone") None
+          b-button.is-small(type="is-link" outlined @click="setDesiredTooltipsAll") &nbsp;All&nbsp;
+        .tooltip-items.flex-col.flex1
+          b-checkbox.cbspace(v-for="item,i in tooltipDesiredColumns" :key="item.col" v-model="item.enabled")  {{ item.col}}
+        .close-row.flex-row(style="padding: 0.5rem; margin-left: auto;gap: 0.25rem;")
+          b-button.is-small(type="is-success" @click="showTooltipConfigurator=false") &nbsp;Close&nbsp;
 
       viz-configurator(v-if="isLoaded"
         :embedded="isEmbedded"
@@ -90,7 +114,7 @@
           img.icon-blue-ramp(:src="icons.blueramp")
           b-slider.pie-slider(type="is-success" :tooltip="true" size="is-small"  :min="0" :max="100" v-model="sliderOpacity")
 
-      zoom-buttons(v-if="isLoaded && !thumbnail")
+      zoom-buttons(v-if="isLoaded && !thumbnail && !vizDetails.mapIsIndependent")
 
       .config-bar(v-if="!thumbnail && !isEmbedded && isLoaded && Object.keys(filters).length"
         :class="{'is-standalone': !configFromDashboard, 'is-disabled': !isLoaded}")
@@ -154,6 +178,7 @@ import {
   Status,
 } from '@/Globals'
 
+import { debounce } from '@/js/util'
 import GeojsonLayer from './GeojsonLayer'
 import BackgroundMapOnTop from '@/components/BackgroundMapOnTop.vue'
 import ColorWidthSymbologizer, { buildRGBfromHexCodes } from '@/js/ColorsAndWidths'
@@ -264,6 +289,7 @@ const MyComponent = defineComponent({
       icons: { blueramp: IconBlueRamp },
       opacitySlider: 50,
       avroNetwork: null as any,
+      isAtlantis: false,
       isAreaMode: false,
       isAvroFile: false,
       isDraggingDivider: 0,
@@ -291,6 +317,8 @@ const MyComponent = defineComponent({
       globalStore,
       globalState: globalStore.state,
       layerId: Math.floor(1e12 * Math.random()),
+      dbClearTooltip: {} as any,
+      wantToClearTooltip: false,
 
       activeColumn: '',
       useCircles: false,
@@ -340,9 +368,14 @@ const MyComponent = defineComponent({
 
       tooltipHtml: '' as string,
       tooltipIsFixed: false as boolean,
+      tooltipDesiredColumns: [] as { col: string; enabled: boolean }[],
+      showTooltipConfigurator: false,
+
       highlightedLinkIndex: -1 as number,
 
       bgLayers: {} as { [name: string]: BackgroundLayer },
+
+      initialView: null as null | { longitude: number; latitude: number; zoom: number },
 
       vizDetails: {
         title: '',
@@ -364,6 +397,7 @@ const MyComponent = defineComponent({
         center: null as any[] | null,
         pitch: null as number | null,
         bearing: null as number | null,
+        mapIsIndependent: false,
         display: {
           fill: {} as any,
           fillHeight: {} as any,
@@ -447,6 +481,11 @@ const MyComponent = defineComponent({
 
   watch: {
     'globalState.viewState'() {
+      // don't pay attention to map motion until we are loaded, to give map center a
+      // fighting chance of being correct
+      if (!this.isLoaded) return
+      if (this.vizDetails.mapIsIndependent) return
+
       if (REACT_VIEW_HANDLES[this.layerId]) REACT_VIEW_HANDLES[this.layerId]()
     },
 
@@ -460,13 +499,31 @@ const MyComponent = defineComponent({
   },
 
   methods: {
+    setDesiredTooltipsNone() {
+      this.tooltipDesiredColumns.forEach(m => (m.enabled = false))
+    },
+    setDesiredTooltipsAll() {
+      this.tooltipDesiredColumns.forEach(m => (m.enabled = true))
+    },
+
+    setupTooltipDesiredColumns() {
+      try {
+        const featureColumns = Object.keys(this.boundaryDataTable)
+        return featureColumns.map(m => {
+          return { col: m, enabled: true }
+        })
+      } catch {
+        return []
+      }
+    },
+
     incrementLoadProgress() {
       this.loadSteps += 1
       this.loadProgress = (100 * this.loadSteps) / this.totalLoadSteps
     },
 
     dividerDragStart(e: MouseEvent) {
-      console.log('dragStart', e)
+      // console.log('dragStart', e)
       this.isDraggingDivider = e.clientX
       this.dragStartWidth = this.legendSectionWidth
     },
@@ -599,8 +656,10 @@ const MyComponent = defineComponent({
 
     async handleClickEvent(event: any) {
       if (event.index != -1) {
-        this.cbTooltip(event.index, event, true)
+        let offset = event?.object?.feature_idx || -1
+        this.cbTooltip(offset, event, true)
         this.tooltipIsFixed = true
+        this.highlightedLinkIndex = event.index
       } else {
         this.tooltipIsFixed = false
         this.highlightedLinkIndex = -1
@@ -608,22 +667,27 @@ const MyComponent = defineComponent({
       }
     },
 
+    clearTooltip() {
+      if (this.wantToClearTooltip && this.highlightedLinkIndex == -1) {
+        this.tooltipHtml = ''
+      }
+    },
+
     cbTooltip(index: number, object: any, forceUpdate: boolean = false) {
       if (this.tooltipIsFixed && !forceUpdate) return
 
-      this.highlightedLinkIndex = index
+      if (object === null || !this.boundaries[index]?.properties) {
+        this.wantToClearTooltip = true
+        this.dbClearTooltip()
+        return
+      }
 
       // tooltip will show values for color settings and for width settings.
       // if there is base data, it will also show values and diff vs. base
       // for both color and width.
 
+      this.wantToClearTooltip = false
       const PRECISION = 4
-
-      if (object === null || !this.boundaries[index]?.properties) {
-        this.tooltipHtml = ''
-        return
-      }
-
       const propList = []
 
       // normalized value first
@@ -643,6 +707,7 @@ const MyComponent = defineComponent({
         const label = this.dataNormalizedValues
           ? cLabel.substring(0, cLabel.lastIndexOf('/'))
           : cLabel
+
         let value = this.truncateFractionalPart(this.dataCalculatedValues[index], PRECISION)
         if (this.dataCalculatedValueLabel.startsWith('%')) value = `${value} %`
 
@@ -666,13 +731,27 @@ const MyComponent = defineComponent({
       if (datasetProps) propList.push(datasetProps)
 
       // --- boundary feature tooltip lines ---
-      let columns = Object.keys(this.boundaryDataTable)
-      if (this.vizDetails.tooltip?.length) {
-        columns = this.vizDetails.tooltip.map(tip => tip.substring(tip.indexOf(':') + 1))
+      let columns
+      if (this.tooltipDesiredColumns.length) {
+        columns = this.tooltipDesiredColumns.filter(m => m.enabled).map(m => m.col)
+      } else {
+        columns = Object.keys(this.boundaryDataTable)
       }
 
+      // dont show nodes or coordinates
+      const hide = new Set(['id', 'from', 'to', 'source', 'dest', 'nodeCoordinates', 'nodeId'])
+      columns = columns.filter(m => !hide.has(m))
+
+      if (this.vizDetails.tooltip?.length) {
+        const delim = this.vizDetails.tooltip[0].indexOf(':') > -1 ? ':' : '.'
+        columns = this.vizDetails.tooltip.map(tip => tip.substring(tip.indexOf(delim) + 1))
+      }
+
+      // nice sort order
+      const sortColumns = ['id', 'from', 'to', ...columns]
+
       let featureProps = ''
-      columns.forEach(column => {
+      sortColumns.forEach(column => {
         if (this.boundaryDataTable[column]) {
           let value = this.boundaryDataTable[column].values[index]
           if (value == null) return
@@ -848,7 +927,7 @@ const MyComponent = defineComponent({
 
         // OR is this a bare geojson/geopackage/shapefile file? - build vizDetails manually
         if (
-          /(network\.xml)(|\.gz)$/.test(filename) ||
+          /(\.xml)(|\.gz)$/.test(filename) ||
           /(\.geojson)(|\.gz)$/.test(filename) ||
           /\.shp$/.test(filename) ||
           /\.gpkg$/.test(filename) ||
@@ -1146,10 +1225,10 @@ const MyComponent = defineComponent({
 
       this.prepareTooltipData(props)
 
-      // Notify Deck.gl of the new tooltip data
-      if (REACT_VIEW_HANDLES[1000 + this.layerId]) {
-        REACT_VIEW_HANDLES[1000 + this.layerId](this.boundaries)
-      }
+      // // Notify Deck.gl of the new tooltip data
+      // if (REACT_VIEW_HANDLES[1000 + this.layerId]) {
+      //   REACT_VIEW_HANDLES[1000 + this.layerId](this.boundaries)
+      // }
       // console.log('triggering updates')
       this.datasets[datasetId] = dataTable
     },
@@ -1161,11 +1240,24 @@ const MyComponent = defineComponent({
 
       const { dataTable, datasetId, dataJoinColumn } = props
 
+      let delim = ':'
       const tips = this.vizDetails.tooltip || []
+      if (tips.length) delim = tips[0].indexOf(':') > -1 ? ':' : '.'
+
+      // user specified no tooltips, but we can help them by adding
+      // data for columns that they've put in their display{} config anyway
+      if (!tips.length) {
+        const symbologies = Object.values(this.vizDetails.display)
+        for (const config of symbologies) {
+          if (config.columnName && config.dataset === datasetId)
+            tips.push(`${datasetId}${delim}${config.columnName}`)
+        }
+      }
+
       const relevantTips = tips
-        .filter(tip => tip.substring(0, tip.indexOf(':')).startsWith(datasetId))
+        .filter(tip => tip.substring(0, tip.indexOf(delim)).startsWith(datasetId))
         .map(tip => {
-          return { id: tip, column: tip.substring(1 + tip.indexOf(':')) }
+          return { id: tip, column: tip.substring(1 + tip.indexOf(delim)) }
         })
 
       // no tips for this datasetId
@@ -1475,7 +1567,7 @@ const MyComponent = defineComponent({
         // rowcount specified: join on the column name itself
         dataJoinColumn = columnName
       } else {
-        // nothing specified: let's hope they didn't want to join
+        // nothing specified, let's hope they didn't want to join
         if (this.datasetChoices.length > 1) {
           const boundaries = this.datasetChoices[0]
           if (datasetKey !== boundaries) {
@@ -1960,6 +2052,7 @@ const MyComponent = defineComponent({
             const angledView = Object.assign({}, this.$store.state.viewState, {
               pitch: 30,
             })
+            // console.log('SMC: handleNewFillHeight')
             this.$store.commit('setMapCamera', angledView)
           }
         }
@@ -2030,13 +2123,6 @@ const MyComponent = defineComponent({
       }
 
       // this.filterListener()
-
-      // set features INSIDE react component
-      if (REACT_VIEW_HANDLES[1000 + this.layerId]) {
-        REACT_VIEW_HANDLES[1000 + this.layerId](
-          typeof this.dataPointRadii == 'number' ? this.boundaries : this.centroids
-        )
-      }
     },
 
     async handleMapClick(click: any) {
@@ -2159,93 +2245,6 @@ const MyComponent = defineComponent({
       }
     },
 
-    // ------------------------------------
-    // TODO do shapes later
-
-    // // hide shapes that don't match filter.
-    // const hideFeature = new Uint8Array(this.boundaries.length).fill(1) // hide by default
-    // filteredRows.forEach(row => {
-    //   const rowNumber = row['@']
-    //   hideFeature[rowNumber] = 0
-    // })
-    // const newFilter = new Float32Array(this.boundaries.length)
-    // for (let i = 0; i < this.boundaries.length; i++) {
-    //   if (this.boundaryFilters[i] == -1 || hideFeature[i]) newFilter[i] = -1
-    // }
-
-    // this.boundaryFilters = newFilter
-    // return
-
-    // ------------------------------------
-
-    // let groupLookup: any // this will be the map of boundary IDs to rows
-    // let groupIndex: any = 1 // unfiltered values will always be element 1 of [key, values[]]
-
-    // if (!filteredRows) {
-    //   // is filter UN-selected? Rebuild full dataset
-    //   // TODO: FIXME this is old ------:
-    //   // const joinCol = this.boundaryDataTable[this.datasetJoinColumn].values
-    //   // const dataValues = this.boundaryDataTable[this.datasetValuesColumn].values
-    //   // groupLookup = group(zip(joinCol, dataValues), d => d[0]) // group by join key
-    //   filteredRows = [] // get rid of this
-    // } else {
-    //   // group filtered values by lookup key
-    //   groupLookup = group(filteredRows, d => d[join[0]])
-    //   groupIndex = this.datasetValuesColumn // index is values column name
-    // }
-
-    // console.log({ groupLookup })
-
-    // // Build the filtered dataset columns
-    // const filteredDataset: DataTable = {}
-    // const columns = Object.keys(filteredRows[0])
-    // for (const column of columns) {
-    //   filteredDataset[column] = { name: column, values: [], type: DataType.NUMBER }
-    // }
-    // for (let i = 0; i < filteredRows.length; i++) {
-    //   for (const column of columns) {
-    //     filteredDataset[column].values[i] = filteredRows[i][column]
-    //   }
-    // }
-
-    // console.log({ filteredDataset })
-    // // ok we have a filter, let's update the geojson values
-    // this.setupJoin(filteredDataset, '_filter', join[0], join[1])
-
-    // // const filteredBoundaries = [] as any[]
-
-    //       this.boundaries.forEach(boundary => {
-    //         // id can be in root of feature, or in properties
-    //         let lookupKey = boundary.properties[joinShapesBy] || boundary[joinShapesBy]
-    //         if (!lookupKey) this.$emit('error', `Shape is missing property "${joinShapesBy}"`)
-
-    //         // the groupy thing doesn't auto-convert between strings and numbers
-    //         let row = groupLookup.get(lookupKey)
-    //         if (row == undefined) row = groupLookup.get('' + lookupKey)
-
-    //         // do we have an answer
-    //         boundary.properties.value = row ? sum(row.map((v: any) => v[groupIndex])) : 'N/A'
-    //         filteredBoundaries.push(boundary)
-    //       })
-
-    // // centroids
-    // const filteredCentroids = [] as any[]
-    // this.centroids.forEach(centroid => {
-    //   const centroidId = centroid.properties!.id
-    //   if (!centroidId) return
-
-    //   let row = groupLookup.get(centroidId)
-    //   if (row == undefined) row = groupLookup.get('' + centroidId)
-    //   centroid.properties!.value = row ? sum(row.map((v: any) => v[groupIndex])) : 'N/A'
-    //   filteredCentroids.push(centroid)
-    // })
-
-    // this.boundaries = filteredBoundaries
-    // this.centroids = filteredCentroids
-    // } catch (e) {
-    //   console.error('' + e)
-    // }
-
     async loadGMNSFeatures(filename: string) {
       // load .zip file
       const path = `${this.subfolder}/${filename}`
@@ -2256,49 +2255,24 @@ const MyComponent = defineComponent({
     },
 
     async loadAvroNetwork(filename: string) {
-      const path = `${this.subfolder}/${filename}`
-      const blob = await this.fileApi.getFileBlob(path)
-
-      const records: any[] = await new Promise((resolve, reject) => {
-        const rows = [] as any[]
-        avro
-          .createBlobDecoder(blob)
-          .on('metadata', (schema: any) => {})
-          .on('data', (row: any) => {
-            rows.push(row)
-          })
-          .on('end', () => {
-            resolve(rows)
-          })
-      })
-
-      const network = records[0]
-
+      const network = (await this.myDataManager.getRoadNetwork(
+        filename,
+        this.subfolder,
+        this.vizDetails,
+        null,
+        true
+      )) as any
       // Build features with geometry, but no properties yet
       // (properties get added in setFeaturePropertiesAsDataSource)
       const numLinks = network.linkId.length
       const features = [] as any[]
-      const crs = network.crs || 'EPSG:4326'
-      const needsProjection = crs !== 'EPSG:4326' && crs !== 'WGS84'
 
       for (let i = 0; i < numLinks; i++) {
         const linkID = network.linkId[i]
-        const fromOffset = 2 * network.from[i]
-        const toOffset = 2 * network.to[i]
-        let coordFrom = [
-          network.nodeCoordinates[fromOffset],
-          network.nodeCoordinates[1 + fromOffset],
+        const coords = [
+          network.source.slice(i * 2, i * 2 + 2),
+          network.dest.slice(i * 2, i * 2 + 2),
         ]
-        let coordTo = [network.nodeCoordinates[toOffset], network.nodeCoordinates[1 + toOffset]]
-        if (!coordFrom || !coordTo) continue
-
-        if (needsProjection) {
-          coordFrom = Coords.toLngLat(crs, coordFrom)
-          coordTo = Coords.toLngLat(crs, coordTo)
-        }
-
-        const coords = [coordFrom, coordTo]
-
         const feature = {
           id: linkID,
           type: 'Feature',
@@ -2314,44 +2288,66 @@ const MyComponent = defineComponent({
       return features
     },
 
+    updateStatus(text: string) {
+      this.statusText = text
+      this.incrementLoadProgress()
+    },
+
     async loadXMLNetwork(filename: string): Promise<any> {
-      if (!this.myDataManager) throw Error('links: no datamanager')
+      if (!this.myDataManager) throw Error('no datamanager')
 
       this.statusText = 'Loading XML network...'
 
+      const features = [] as any[]
+
       try {
-        const network = await this.myDataManager.getRoadNetwork(
+        const network = (await this.myDataManager.getRoadNetwork(
           filename,
           this.subfolder,
           this.vizDetails,
-          (message: string) => {
-            this.statusText = message
-            this.incrementLoadProgress()
-          }
+          this.updateStatus
           // true // load extra columns
-        )
-        // convert to geojson
-        const numLinks = network.source.length / 2
-        const boundaries = [] as any[]
+        )) as any // TODO type NetworkLinks is a bit archaic at this point, needs an update
+
+        // Build features with geometry, but no properties yet
+        // (properties get added in setFeaturePropertiesAsDataSource)
+        const numLinks = network.linkId.length
+        const crs = network.crs || 'EPSG:4326'
+        const needsProjection = crs !== 'EPSG:4326' && crs !== 'WGS84'
+        this.isAtlantis = !!network.isAtlantis
+
         for (let i = 0; i < numLinks; i++) {
-          const offset = i * 2
-          const feature = {
-            type: 'Feature',
-            id: network.linkIds[i],
-            properties: {},
-            geometry: {
-              type: 'LineString',
-              coordinates: [
-                [network.source[offset], network.source[offset + 1]],
-                [network.dest[offset], network.dest[offset + 1]],
-              ],
-            },
+          const linkID = network.linkId[i]
+          const fromOffset = 2 * network.from[i]
+          const toOffset = 2 * network.to[i]
+          let coordFrom = [
+            network.nodeCoordinates[fromOffset],
+            network.nodeCoordinates[1 + fromOffset],
+          ]
+          let coordTo = [network.nodeCoordinates[toOffset], network.nodeCoordinates[1 + toOffset]]
+
+          if (needsProjection) {
+            coordFrom = Coords.toLngLat(crs, coordFrom)
+            coordTo = Coords.toLngLat(crs, coordTo)
           }
-          boundaries.push(feature)
+
+          const coords = [coordFrom, coordTo]
+
+          const feature = {
+            id: linkID,
+            type: 'Feature',
+            properties: {},
+            geometry: { type: 'LineString', coordinates: coords },
+          }
+          features.push(feature)
         }
-        return boundaries
+
+        this.avroNetwork = network
+        this.isAvroFile = true
       } catch (e) {
-        console.error('' + e)
+        this.$emit('error', '' + e)
+      } finally {
+        return features
       }
     },
 
@@ -2472,25 +2468,25 @@ const MyComponent = defineComponent({
         await this.$nextTick()
         this.incrementLoadProgress()
 
+        this.boundaries = []
+        await this.$nextTick()
         this.boundaries = boundaries
         await this.$nextTick()
         this.incrementLoadProgress()
 
         // generate centroids if we have polygons
-        if (!hasNoPolygons || hasPoints) {
-          await this.generateCentroidsAndMapCenter()
-        } else if (this.needsInitialMapExtent) {
-          this.calculateAndMoveToCenter()
-        }
+        // if (!hasNoPolygons || hasPoints) {
+        //   await this.generateCentroidsAndMapCenter()
+        // }
 
         // Need to wait one tick so Vue inserts the Deck.gl view AFTER center is calculated
         // (not everyone lives in Berlin)
         await this.$nextTick()
 
-        // set features INSIDE react component
-        if (REACT_VIEW_HANDLES[1000 + this.layerId]) {
-          REACT_VIEW_HANDLES[1000 + this.layerId](this.boundaries)
-        }
+        // // set features INSIDE react component
+        // if (REACT_VIEW_HANDLES[1000 + this.layerId]) {
+        //   REACT_VIEW_HANDLES[1000 + this.layerId](this.boundaries)
+        // }
       } catch (e) {
         const err = e as any
         const message = err.statusText || 'Could not load'
@@ -2517,7 +2513,7 @@ const MyComponent = defineComponent({
         // create the DataTable right here, we already have everything in memory
         const avroTable: DataTable = {}
 
-        const columns = this.avroNetwork.linkAttributes as string[]
+        const columns = [...this.avroNetwork.linkAttributes, 'from', 'to'] as string[]
         columns.sort()
 
         for (const colName of columns) {
@@ -2534,16 +2530,19 @@ const MyComponent = defineComponent({
           avroTable[colName] = dataColumn
         }
         // special case: allowedModes needs to be looked up
-        const modeLookup = this.avroNetwork['modes']
-        const allowedModes = avroTable['allowedModes']
-        allowedModes.type = DataType.STRING
-        allowedModes.values = allowedModes.values.map((v: number) => modeLookup[v])
-
+        if (this.avroNetwork.allowedModes) {
+          const modeLookup = this.avroNetwork['modes']
+          const allowedModes = avroTable['allowedModes']
+          allowedModes.type = DataType.STRING
+          allowedModes.values = allowedModes.values.map((v: number) => modeLookup[v])
+          avroTable['modes'] = allowedModes
+          delete avroTable['allowedModes']
+        }
         dataTable = await this.myDataManager.setRowWisePropertyTable(filename, avroTable, config)
 
         // special case: Avro networks have linkId instead of id, jesus christ!! :-()
         if ('linkId' in dataTable && !('id' in dataTable)) {
-          dataTable = { id: dataTable.linkId, ...dataTable }
+          dataTable = { id: dataTable.linkId, ...dataTable } as DataTable
           dataTable.id.name = 'id'
         }
 
@@ -2569,10 +2568,13 @@ const MyComponent = defineComponent({
 
       this.config.datasets = Object.assign({}, this.vizDetails.datasets)
 
-      this.myDataManager.addFilterListener(
-        { dataset: datasetId, subfolder: '' },
-        this.processFiltersNow
-      )
+      if (!this.vizDetails.tooltip || !this.vizDetails.tooltip.length) {
+        this.tooltipDesiredColumns = this.setupTooltipDesiredColumns()
+      }
+      // this.myDataManager.addFilterListener(
+      //   { dataset: datasetId, subfolder: '' },
+      //   this.processFiltersNow
+      // )
     },
 
     async calculateAndMoveToCenter() {
@@ -2582,29 +2584,43 @@ const MyComponent = defineComponent({
       const numFeatures = this.boundaries.length
 
       for (let idx = 0; idx < numFeatures; idx += 256) {
-        const centroid = turf.centerOfMass(this.boundaries[idx])
-        if (centroid?.geometry?.coordinates) {
-          centerLong += centroid.geometry.coordinates[0]
-          centerLat += centroid.geometry.coordinates[1]
-          numCoords += 1
+        try {
+          const centroid = turf.centerOfMass(this.boundaries[idx])
+          if (centroid?.geometry?.coordinates) {
+            centerLong += centroid.geometry.coordinates[0]
+            centerLat += centroid.geometry.coordinates[1]
+            numCoords += 1
+          }
+        } catch (e) {
+          // who cares
         }
       }
 
       centerLong /= numCoords
       centerLat /= numCoords
+      let zoom = 9
 
-      console.log('CENTER', centerLong, centerLat)
-      if (this.needsInitialMapExtent && !this.vizDetails.center) {
-        this.$store.commit('setMapCamera', {
-          longitude: centerLong,
-          latitude: centerLat,
-          center: [centerLong, centerLat],
-          bearing: 0,
-          pitch: 0,
-          zoom: 9,
-          initial: true,
-        })
-        this.needsInitialMapExtent = false
+      console.log('--- CALCULATED CENTER', centerLong, centerLat)
+      // console.log('SMC: calculateAndMoveToCenter')
+      if (centerLong == undefined || centerLat == undefined) {
+        centerLong = 30
+        centerLat = 30
+        zoom = 5
+      }
+
+      const view = {
+        longitude: centerLong,
+        latitude: centerLat,
+        center: [centerLong, centerLat],
+        bearing: 0,
+        pitch: 0,
+        zoom,
+        initial: true,
+      }
+      this.initialView = view
+
+      if (!this.vizDetails.mapIsIndependent) {
+        this.$store.commit('setMapCamera', view)
       }
     },
 
@@ -2726,7 +2742,8 @@ const MyComponent = defineComponent({
       // Allow user to override .PRJ projection with YAML config
       const guessCRS = this.vizDetails.projection || Coords.guessProjection(projection)
 
-      console.log({ guessCRS })
+      // console.log({ guessCRS })
+
       // then, reproject if we have a .prj file
       if (guessCRS) {
         this.statusText = 'Projecting coordinates...'
@@ -2750,32 +2767,6 @@ const MyComponent = defineComponent({
         return []
       }
 
-      // if (this.needsInitialMapExtent && !this.$store.state.viewState.latitude) {
-      if (true) {
-        // if we don't have a user-specified map center/zoom, focus on the shapefile itself
-
-        const long = []
-        const lat = []
-        for (let i = 0; i < geojson.features.length; i += 128) {
-          const firstPoint = getFirstPoint(geojson.features[i].geometry.coordinates)
-          long.push(firstPoint[0])
-          lat.push(firstPoint[1])
-        }
-        const longitude = long.reduce((x, y) => x + y) / long.length
-        const latitude = lat.reduce((x, y) => x + y) / lat.length
-
-        this.$store.commit('setMapCamera', {
-          longitude,
-          latitude,
-          bearing: 0,
-          pitch: 0,
-          zoom: 9,
-          center: [longitude, latitude],
-          initial: true,
-        })
-      }
-
-      this.needsInitialMapExtent = false
       return geojson.features as any[]
     },
 
@@ -2950,102 +2941,7 @@ const MyComponent = defineComponent({
       this.filters[column] = { column, label: column, options, active: [], dataset }
     },
 
-    updateChart() {
-      // boundaryDataTable come back as an object of columnName: values[].
-      // We need to make a lookup of the values by ID, and then
-      // insert those values into the boundaries geojson.
-
-      // console.log(this.config)
-      // console.log(this.datasets)
-      if (!this.config.display || !this.config.datasets) return
-
-      let joinShapesBy = 'linkId'
-
-      if (this.config.shapes?.join) joinShapesBy = this.config.shapes.join
-      // throw Error('Need "join" property to link shapes to datasets')
-
-      const datasetJoinCol = this.datasetJoinColumn // used to be this.config.display.fill.join
-      if (!datasetJoinCol) {
-        console.error(`No join column ${datasetJoinCol}`)
-        return
-      }
-
-      // value columns should be an array but might not be there yet
-      let valueColumns = this.config.display.fill.values
-      if (!valueColumns) {
-        this.statusText = ''
-        throw Error(`Need to specify column for data values`)
-      }
-
-      // Display values from query param if available, or config, or first option.
-      if (this.$route.query.display) this.config.display.fill.columnName = this.$route.query.display
-      let datasetValuesCol = this.config.display.fill.columnName || valueColumns[0]
-
-      this.datasetValuesColumn = datasetValuesCol
-      // this.datasetValuesColumnOptions = valueColumns
-
-      // this.setupFilters()
-
-      // 1. build the data lookup for each key in the dataset.
-      //    There is often more than one row per key, so we will
-      //    create an array for the group now, and (sum) them in step 2 below
-      const joinCol = this.boundaryDataTable[datasetJoinCol].values
-      const dataValues = this.boundaryDataTable[datasetValuesCol].values
-      const groupLookup = group(zip(joinCol, dataValues), d => d[0]) // group by join key
-
-      let max = 0
-
-      // 2. insert values into geojson
-      for (let idx = 0; idx < this.boundaries.length; idx++) {
-        const boundary = this.boundaries[idx]
-        const centroid = this.centroids[idx]
-
-        // id can be in root of feature, or in properties
-        let lookupValue = boundary[joinShapesBy]
-        if (lookupValue == undefined) lookupValue = boundary.properties[joinShapesBy]
-
-        if (lookupValue === undefined) {
-          this.$emit('error', `Shape is missing property "${joinShapesBy}"`)
-        }
-
-        // SUM the values of the second elements of the zips from (1) above
-        const row = groupLookup.get(lookupValue)
-        if (row) {
-          boundary.properties.value = sum(row.map(v => v[1]))
-          max = Math.max(max, boundary.properties.value)
-        } else {
-          boundary.properties.value = 'N/A'
-        }
-
-        // update the centroid too
-        if (centroid) centroid.properties!.value = boundary.properties.value
-      }
-
-      // this.maxValue = max // this.boundaryDataTable[datasetValuesCol].max || 0
-      this.maxValue = this.boundaryDataTable[datasetValuesCol].max || 0
-
-      // // 3. insert values into centroids
-      // this.centroids.forEach(centroid => {
-      //   const centroidId = centroid.properties!.id
-      //   if (!centroidId) return
-
-      //   let row = groupLookup.get(centroidId)
-      //   if (row === undefined) row = groupLookup.get(parseInt(centroidId))
-      //   centroid.properties!.value = row ? sum(row.map(v => v[1])) : 'N/A'
-      // })
-
-      // sort them so big bubbles are below small bubbles
-      this.centroids = this.centroids.sort((a: any, b: any) =>
-        a.properties.value > b.properties.value ? -1 : 1
-      )
-      this.activeColumn = 'value'
-    },
-
     clearData() {
-      // these lines change the properties of these objects
-      // WITHOUT reassigning them to new objects; this is
-      // essential for the garbage-collection to work properly.
-      // Otherwise we get a 500Mb memory leak on every view :-D
       this.boundaries = []
       this.centroids = []
       this.boundaryDataTable = {}
@@ -3059,6 +2955,10 @@ const MyComponent = defineComponent({
       this.dataCalculatedValues = null
       this.dataCalculatedValueLabel = ''
       this.bgLayers = {}
+      this.cbDatasetJoined = null
+      this.dataNormalizedValues = null
+      this.resizer = null
+      this.myDataManager.clearCache()
     },
 
     updateBgLayers() {
@@ -3170,6 +3070,8 @@ const MyComponent = defineComponent({
 
   async mounted() {
     try {
+      this.dbClearTooltip = debounce(this.clearTooltip, 1000)
+
       // EMBED MODE?
       this.setEmbeddedMode()
 
@@ -3191,7 +3093,7 @@ const MyComponent = defineComponent({
       ) {
         this.$emit(
           'error',
-          `Invalid map center coordinate specified. This doesn't look like longitude/latitude: ${this.config.center}`
+          `Invalid map center. This doesn't look like longitude/latitude: ${this.config.center}`
         )
         const initialView = this.globalState.viewState
         this.vizDetails.center = [initialView.longitude, initialView.latitude]
@@ -3209,17 +3111,24 @@ const MyComponent = defineComponent({
 
       this.setupLogoMover()
 
+      // if we have a USER-SUPPLIED center, move there now
+      // (otherwise we will calc it after the shapes are loaded)
       if (this.needsInitialMapExtent && this.vizDetails.center) {
-        this.$store.commit('setMapCamera', {
+        this.needsInitialMapExtent = false
+        const view = {
           center: this.vizDetails.center,
+          longitude: this.vizDetails.center[0],
+          latitude: this.vizDetails.center[1],
           zoom: this.vizDetails.zoom || 9,
           bearing: this.vizDetails.bearing || 0,
           pitch: this.vizDetails.pitch || 0,
-          longitude: this.vizDetails.center ? this.vizDetails.center[0] : 0,
-          latitude: this.vizDetails.center ? this.vizDetails.center[1] : 0,
           initial: true,
-        })
-        this.needsInitialMapExtent = false
+        }
+        if (this.vizDetails.mapIsIndependent) {
+          this.initialView = view
+        } else {
+          this.$store.commit('setMapCamera', view)
+        }
       }
 
       this.expColors = this.config.display?.fill?.exponentColors
@@ -3237,21 +3146,24 @@ const MyComponent = defineComponent({
       await this.loadBoundaries()
       this.filterShapesNow()
 
+      // if we still need a centerpoint, calculate it
+      if (this.needsInitialMapExtent && !this.vizDetails.center) {
+        await this.calculateAndMoveToCenter()
+        this.needsInitialMapExtent = false
+      }
+
       this.isLoaded = true
       this.$emit('isLoaded')
 
+      await this.$nextTick()
       await this.loadDatasets()
 
-      // Check URL query parameters
-
       this.datasets = Object.assign({}, this.datasets)
-      this.config.datasets = JSON.parse(JSON.stringify(this.datasets))
+      // this.config.datasets = JSON.parse(JSON.stringify(this.datasets))
       this.vizDetails = Object.assign({}, this.vizDetails)
 
       this.honorQueryParameters()
-
       this.statusText = ''
-
       this.loadBackgroundLayers()
     } catch (e) {
       this.$emit('error', '' + e)
@@ -3263,11 +3175,6 @@ const MyComponent = defineComponent({
   beforeDestroy() {
     // MUST delete the React view handles to prevent gigantic memory leaks!
     delete REACT_VIEW_HANDLES[this.layerId]
-
-    if (REACT_VIEW_HANDLES[1000 + this.layerId]) {
-      REACT_VIEW_HANDLES[1000 + this.layerId]([])
-      delete REACT_VIEW_HANDLES[1000 + this.layerId]
-    }
 
     this.clearData()
     this.legendStore.clear()
@@ -3369,6 +3276,7 @@ export default MyComponent
     left: 0;
     right: 0;
     border-top: 1px solid #88888880;
+    max-height: 50%;
   }
 }
 
@@ -3384,6 +3292,11 @@ export default MyComponent
   text-align: left;
   background-color: var(--bgCardFrame);
   border: 1px solid #88888880;
+  max-height: 50%;
+}
+
+.the-html {
+  overflow-y: auto;
 }
 
 .config-bar {
@@ -3430,8 +3343,14 @@ export default MyComponent
   -moz-user-select: none;
   -ms-user-select: none;
   user-select: none;
-  background-color: var(--bgPanel);
   width: min-content;
+  // background-color: var(--bgPanel);
+
+  h5 {
+    font-weight: bold;
+    text-transform: uppercase;
+    margin-top: 0.5rem;
+  }
 }
 
 .filter {
@@ -3494,6 +3413,7 @@ export default MyComponent
 
 .simple-checkbox {
   padding: 0.25rem;
+  width: max-content;
 }
 
 .simple-checkbox:hover {
@@ -3568,5 +3488,36 @@ export default MyComponent
   width: 10rem;
   padding: 1rem;
   margin: 0;
+}
+
+.modal-tooltip-picker {
+  position: absolute;
+  inset: 0 0 0 0;
+  z-index: 20;
+  background-color: var(--bgBold);
+  margin: auto 5rem;
+  max-height: 30rem;
+  border: 1px solid var(--linkHover);
+  text-align: left;
+  filter: $filterShadow;
+
+  .tooltip-items {
+    padding: 0 0.75rem;
+    overflow-y: auto;
+    margin: 0.5rem 0;
+    width: 100%;
+  }
+
+  h4 {
+    color: white;
+    font-weight: bold;
+    padding: 2px 0.5rem;
+    width: 100%;
+    background-color: $appTag;
+  }
+
+  .cbspace {
+    margin-bottom: 3px;
+  }
 }
 </style>

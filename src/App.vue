@@ -1,7 +1,7 @@
 <template lang="pug">
 #main-app(:class="{'full-page-app' : true, 'dark-mode': isDarkMode}" )
 
-  top-nav-bar.top-bar(v-if="(!$store.state.topNavItems && !$store.state.leftNavItems)")
+  //- top-nav-bar.top-bar(v-if="(!$store.state.topNavItems && !$store.state.leftNavItems)")
 
   .center-area(v-if="isFileSystemLoaded")
     //- login-panel.login-panel
@@ -41,8 +41,6 @@ import plugins from '@/plugins/pluginRegistry'
 import { ColorScheme, MAPBOX_TOKEN, MAP_STYLES_OFFLINE } from '@/Globals'
 import { addInitialLocalFilesystems, addFlaskFilesystems } from '@/fileSystemConfig'
 
-import TopNavBar from '@/layout-manager/TopNavBar.vue'
-
 // MAPBOX TOKEN
 // this is a required workaround to get the mapbox token assigned in TypeScript
 // see https://stackoverflow.com/questions/44332290/mapbox-gl-typing-wont-allow-accesstoken-assignment
@@ -62,7 +60,7 @@ plugins.forEach(p => {
 export default defineComponent({
   name: 'SimWrapper',
   i18n,
-  components: { TopNavBar },
+  components: {},
   data: () => {
     return {
       state: globalStore.state,
@@ -206,12 +204,15 @@ export default defineComponent({
 
     document.addEventListener('keydown', this.toggleUIPanels)
 
+    this.$store.dispatch('gamepadSetup')
+
     // remove the splasher after a bit
     this.splasher = setTimeout(() => {
       this.showSplash = false
     }, 5000)
   },
   beforeDestroy() {
+    this.$store.dispatch('gamepadStop')
     document.removeEventListener('keydown', this.toggleUIPanels)
     window.clearTimeout(this.splasher)
   },
@@ -226,6 +227,27 @@ export default defineComponent({
 @import '~/buefy/dist/buefy.css';
 
 @import '@/styles.scss';
+
+@font-face {
+  font-family: 'FiraSans';
+  src: url('/webfonts/Firava.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Figtree';
+  src: url('/webfonts/figtree-var.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Figtree';
+  src: url('/webfonts/figtree-italic-var.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: italic;
+}
 
 html {
   box-sizing: border-box;
@@ -242,6 +264,7 @@ html {
   font-family: $mainFont;
   height: 100%;
   overscroll-behavior: contain;
+  font-weight: 300;
 }
 
 h1,
@@ -273,10 +296,7 @@ canvas {
 }
 
 .top-bar {
-  width: 100%;
-  margin: 0 auto;
   transition: padding 0.2s ease-in-out, max-width 0.3s ease-in-out;
-  // box-shadow: 0px 6px 10px #00000048;
   z-index: 5;
 }
 

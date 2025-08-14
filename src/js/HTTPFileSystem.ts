@@ -15,7 +15,7 @@ enum FileSystemType {
   FETCH,
   CHROME,
   GITHUB,
-  AZURE,
+  FLASK,
 }
 
 naturalSort.insensitive = true
@@ -39,7 +39,7 @@ class HTTPFileSystem {
   private fsHandle: FileSystemAPIHandle | null
   private store: any
   private isGithub: boolean
-  private isOMX: boolean
+  private isFlask: boolean
   private type: FileSystemType
 
   constructor(project: FileSystemConfig, store?: any) {
@@ -49,12 +49,12 @@ class HTTPFileSystem {
     this.fsHandle = project.handle || null
     this.store = store || null
     this.isGithub = !!project.isGithub
-    this.isOMX = !!project.omx
+    this.isFlask = !!project.flask
 
     this.type = FileSystemType.FETCH
     if (this.fsHandle) this.type = FileSystemType.CHROME
     if (this.isGithub) this.type = FileSystemType.GITHUB
-    if (this.isOMX) this.type = FileSystemType.AZURE
+    if (this.isFlask) this.type = FileSystemType.FLASK
 
     this.baseUrl = project.baseURL
     if (!project.baseURL.endsWith('/')) this.baseUrl += '/'
@@ -111,7 +111,7 @@ class HTTPFileSystem {
         return this._getFileFromChromeFileSystem(scaryPath)
       case FileSystemType.GITHUB:
         return this._getFileFromGitHub(scaryPath)
-      case FileSystemType.AZURE:
+      case FileSystemType.FLASK:
         return this._getFileFromAzure(scaryPath)
       case FileSystemType.FETCH:
       default:
@@ -119,10 +119,14 @@ class HTTPFileSystem {
     }
   }
 
-  private async _getFileFetchResponse(scaryPath: string): Promise<Response> {
+  private async _getFileFetchResponse(
+    scaryPath: string,
+    options?: { maxBytes: number }
+  ): Promise<Response> {
     const path = this.cleanURL(scaryPath)
-    // console.log(path)
     const headers: any = {}
+
+    if (options?.maxBytes) headers.Range = `bytes=0-${options.maxBytes - 1}`
 
     // const credentials = globalStore.state.credentials[this.urlId]
     // if (this.needsAuth) {
@@ -132,8 +136,8 @@ class HTTPFileSystem {
     const myRequest = new Request(path, { headers })
     const response = await fetch(myRequest).then(response => {
       // Check HTTP Response code: 200 is OK, everything else is a problem
-      if (response.status != 200) {
-        console.log('Status:', response.status)
+      if (response.status >= 300) {
+        console.warn('Status:', response.status)
         throw response
       }
       return response
@@ -225,7 +229,10 @@ class HTTPFileSystem {
     // return json
   }
 
-  private async _getFileFromChromeFileSystem(scaryPath: string): Promise<Response> {
+  private async _getFileFromChromeFileSystem(
+    scaryPath: string,
+    options?: { maxBytes: number }
+  ): Promise<Response> {
     // Chrome File System Access API doesn't handle nested paths, annoying.
     // We need to first fetch the directory to get the file handle, and then
     // get the file contents.
@@ -409,19 +416,42 @@ class HTTPFileSystem {
     return response.blob()
   }
 
-  async getFileStream(scaryPath: string): Promise<ReadableStream> {
+  async probeXmlFileType(path: string) {
+    let stream = await this.getFileStream(path, { maxBytes: 1024 })
+    if (path.toLocaleLowerCase().endsWith('.gz')) {
+      stream = stream.pipeThrough(new DecompressionStream('gzip'))
+    }
+
+    const result = await stream.getReader().read()
+    const view = new Uint8Array(result.value)
+    const text = new TextDecoder('utf-8').decode(view.slice(0, Math.min(view.length, 1024)))
+
+    const dtdMatch = text.match(
+      /<!DOCTYPE\s+(\w+)\s*(?:\[\s*([^\]]*)\s*\])?(?:\s+PUBLIC\s+"([^"]+)"\s+"([^"]+)"|(?:\s+SYSTEM\s+)?"([^"]+)")?/is
+    )
+    if (dtdMatch) return dtdMatch[1] // root element
+    return null
+  }
+
+  async getFileStream(scaryPath: string, options?: { maxBytes: number }): Promise<ReadableStream> {
     let stream
     switch (this.type) {
       case FileSystemType.CHROME:
-        stream = await this._getFileFromChromeFileSystem(scaryPath)
+        stream = await this._getFileFromChromeFileSystem(scaryPath, options)
           .then(response => response.blob())
           .then(blob => blob.stream())
         return stream as any
       case FileSystemType.FETCH:
-        stream = await this._getFileFetchResponse(scaryPath).then(response => response.body)
+        stream = await this._getFileFetchResponse(scaryPath, options).then(
+          response => response.body
+        )
+        return stream as any
+      case FileSystemType.FLASK:
+        const fullUrl = `/file/${this.slug}?prefix=${scaryPath}`
+        stream = await this._getFileFetchResponse(fullUrl, options).then(response => response.body)
         return stream as any
       default:
-        throw Error('Not implemented')
+        throw Error(`FileSystemType ${this.type} not implemented`)
     }
   }
 
@@ -454,7 +484,7 @@ class HTTPFileSystem {
         case FileSystemType.GITHUB:
           dirEntry = await this._getDirectoryFromGitHub(stillScaryPath)
           break
-        case FileSystemType.AZURE:
+        case FileSystemType.FLASK:
           dirEntry = await this._getDirectoryFromAzure(stillScaryPath)
           break
         case FileSystemType.FETCH:

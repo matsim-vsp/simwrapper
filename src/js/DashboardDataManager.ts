@@ -16,11 +16,13 @@ import { rollup } from 'd3-array'
 import globalStore from '@/store'
 import HTTPFileSystem from './HTTPFileSystem'
 import { DataTable, DataTableColumn, DataType, FileSystemConfig, Status } from '@/Globals'
-import { findMatchingGlobInFiles } from '@/js/util'
+import { findMatchingGlobInFiles, gUnzip, parseXML } from '@/js/util'
 import avro from '@/js/avro'
+import * as Comlink from 'comlink'
 
 import DataFetcherWorker from '@/workers/DataFetcher.worker.ts?worker'
 import RoadNetworkLoader from '@/workers/RoadNetworkLoader.worker.ts?worker'
+import WasmXmlNetworkParser from '@/workers/WasmXmlNetworkParser.worker.ts?worker'
 import Coords from './Coords'
 
 interface configuration {
@@ -47,7 +49,7 @@ export interface FilterDefinition {
 export interface NetworkLinks {
   source: Float32Array
   dest: Float32Array
-  linkIds: any[]
+  id: any[]
   projection: String
 }
 
@@ -73,6 +75,7 @@ export default class DashboardDataManager {
 
   public kill() {
     for (const worker of this.threads) worker.terminate()
+    this.threads = []
   }
 
   public getFilteredDataset(config: { dataset: string }): { filteredRows: any[] | null } {
@@ -243,12 +246,15 @@ export default class DashboardDataManager {
       dataset: new Promise<DataTable>((resolve, reject) => {
         const thread = new DataFetcherWorker()
         // console.log('NEW WORKER', thread)
-        this.threads.push(thread)
 
         try {
-          thread.postMessage({ config: fullConfig, featureProperties })
-
           thread.onmessage = e => {
+            // wait for ready signal
+            if (e.data.ready) {
+              this.threads.push(thread)
+              thread.postMessage({ config: fullConfig, featureProperties })
+              return
+            }
             thread.terminate()
             if (e.data.error) {
               console.error(e.data.error)
@@ -303,7 +309,6 @@ export default class DashboardDataManager {
       this.networks[path] = this._fetchNetwork({
         subfolder,
         filename,
-        vizDetails,
         cbStatus,
         options,
         extra,
@@ -562,32 +567,41 @@ export default class DashboardDataManager {
     config: { dataset: string },
     options?: { highPrecision?: boolean; subfolder?: string }
   ) {
-    // sometimes we are dealing with subfolder/subtabs, so always fetch file list anew.
-    const { files } = await new HTTPFileSystem(this.fileApi).getDirectory(
-      options?.subfolder || this.subfolder
-    )
+    let dirfiles
+    try {
+      // sometimes we are dealing with subfolder/subtabs, so always fetch file list anew.
+      const { files } = await new HTTPFileSystem(this.fileApi).getDirectory(
+        options?.subfolder || this.subfolder
+      )
+      dirfiles = files
+    } catch (e) {
+      console.error('FAIL! ' + e)
+      throw Error('' + e)
+    }
+
+    let files = dirfiles
 
     return new Promise<DataTable>((resolve, reject) => {
       const thread = new DataFetcherWorker()
-      this.threads.push(thread)
-      // console.log('NEW WORKER', thread)
       try {
-        thread.postMessage({
-          fileSystemConfig: this.fileApi,
-          subfolder: options?.subfolder || this.subfolder,
-          files,
-          config: config,
-          options,
-        })
-
         thread.onmessage = e => {
+          // wait for ready signal and then begin work:
+          if (e.data.ready) {
+            // this.threads.push(thread)
+            thread.postMessage({
+              fileSystemConfig: this.fileApi,
+              subfolder: options?.subfolder || this.subfolder,
+              files,
+              config: config,
+              options,
+            })
+            return
+          }
           thread.terminate()
-          if (!e.data || e.data.error) {
+          if (e.data.error) {
             let msg = '' + (e.data?.error || 'Error loading file')
             msg = msg.replace('[object Response]', 'Error loading file')
-
             if (config?.dataset && msg.indexOf(config.dataset) === -1) msg += `: ${config.dataset}`
-
             reject(msg)
           }
           resolve(e.data)
@@ -603,86 +617,91 @@ export default class DashboardDataManager {
   private async _getAvroNetwork(props: {
     subfolder: string
     filename: string
-    vizDetails: any
+    options?: any
     cbStatus?: any
-  }): Promise<NetworkLinks> {
-    const httpFileSystem = new HTTPFileSystem(this.fileApi)
-    const blob = await httpFileSystem.getFileBlob(`${props.subfolder}/${props.filename}`)
+  }): Promise<NetworkLinks | null> {
+    try {
+      const httpFileSystem = new HTTPFileSystem(this.fileApi)
+      const blob = await httpFileSystem.getFileBlob(`${props.subfolder}/${props.filename}`)
 
-    const records: any[] = await new Promise(async (resolve, reject) => {
-      const rows = [] as any[]
+      const records: any[] = await new Promise(async (resolve, reject) => {
+        const rows = [] as any[]
 
-      avro
-        .createBlobDecoder(blob)
-        .on('metadata', (schema: any) => {})
-        .on('data', (row: any) => {
-          rows.push(row)
-        })
-        .on('end', () => {
-          resolve(rows)
-        })
-    })
+        avro
+          .createBlobDecoder(blob)
+          .on('metadata', (schema: any) => {})
+          .on('data', (row: any) => {
+            rows.push(row)
+          })
+          .on('end', () => {
+            resolve(rows)
+          })
+      })
 
-    const network = records[0]
+      const network = records[0]
 
-    // Build bare network with no attributes, just like other networks
-    // TODO: at some point this should merge with Shapefile reader
+      const numLinks = network.linkId.length
+      const source: Float32Array = new Float32Array(2 * numLinks)
+      const dest: Float32Array = new Float32Array(2 * numLinks)
 
-    const numLinks = network.linkId.length
-
-    const crs = network.crs || 'EPSG:4326'
-    const needsProjection = crs !== 'EPSG:4326' && crs !== 'WGS84'
-
-    const source: Float32Array = new Float32Array(2 * numLinks)
-    const dest: Float32Array = new Float32Array(2 * numLinks)
-    const linkIds: any = []
-
-    let coordFrom = [0, 0]
-    let coordTo = [0, 0]
-
-    for (let i = 0; i < numLinks; i++) {
-      const linkID = network.linkId[i]
-      const fromOffset = 2 * network.from[i]
-      const toOffset = 2 * network.to[i]
-
-      coordFrom[0] = network.nodeCoordinates[fromOffset]
-      coordFrom[1] = network.nodeCoordinates[1 + fromOffset]
-      coordTo[0] = network.nodeCoordinates[toOffset]
-      coordTo[1] = network.nodeCoordinates[1 + toOffset]
-
-      if (needsProjection) {
-        coordFrom = Coords.toLngLat(crs, coordFrom)
-        coordTo = Coords.toLngLat(crs, coordTo)
+      for (let i = 0; i < numLinks; i++) {
+        const fromOffset = 2 * network.from[i]
+        const toOffset = 2 * network.to[i]
+        source[2 * i] = network.nodeCoordinates[fromOffset]
+        source[2 * i + 1] = network.nodeCoordinates[1 + fromOffset]
+        dest[2 * i] = network.nodeCoordinates[toOffset]
+        dest[2 * i + 1] = network.nodeCoordinates[1 + toOffset]
       }
 
-      source[2 * i + 0] = coordFrom[0]
-      source[2 * i + 1] = coordFrom[1]
-      dest[2 * i + 0] = coordTo[0]
-      dest[2 * i + 1] = coordTo[1]
+      network.source = source
+      network.dest = dest
 
-      linkIds[i] = linkID
+      return network
+    } catch (e) {
+      console.error(e)
+      return null
     }
+  }
 
-    const links = { source, dest, linkIds, projection: 'EPSG:4326' } as any
-
-    // add network attributes back in
-    for (const col of network.linkAttributes) {
-      if (col !== 'linkId') links[col] = network[col]
+  private async _getEPSGfromConfig() {
+    try {
+      const fApi = new HTTPFileSystem(this.fileApi)
+      const { files } = await fApi.getDirectory(this.subfolder)
+      const outputConfigs = files.filter(
+        f => f.indexOf('config.xml') > -1 || f.indexOf('config_reduced.xml') > -1
+      )
+      if (outputConfigs.length) {
+        for (const xmlConfigFileName of outputConfigs) {
+          try {
+            const raw = await fApi.getFileBlob(`${this.subfolder}/${xmlConfigFileName}`)
+            const buffer = await raw.arrayBuffer()
+            const bytes = await gUnzip(buffer)
+            const text = new TextDecoder().decode(bytes)
+            const configXML = (await parseXML(text)) as any
+            const global = configXML.config.module.filter((f: any) => f.$name === 'global')[0]
+            const crs = global.param.filter((p: any) => p.$name === 'coordinateSystem')[0]
+            const crsValue = crs.$value
+            return crsValue
+          } catch (e) {
+            console.warn('Failed parsing', xmlConfigFileName)
+          }
+        }
+      }
+    } catch (e) {
+      console.error('' + e)
+      return ''
     }
-    return links
   }
 
   private async _fetchNetwork(props: {
     subfolder: string
     filename: string
-    vizDetails: any
     cbStatus?: any
     extra?: boolean
     options: { crs?: string }
   }) {
     return new Promise<NetworkLinks>(async (resolve, reject) => {
-      const { subfolder, filename, vizDetails, cbStatus, options } = props
-
+      const { subfolder, filename, cbStatus, options } = props
       const path = `/${subfolder}/${filename}`
       console.log('load network:', path)
 
@@ -701,13 +720,68 @@ export default class DashboardDataManager {
         reject('Error reading folder: ' + folder)
       }
 
-      // AVRO NETWORK: can't get crummy library to work in a web-worker
+      // AVRO NETWORK
       if (filename.toLocaleLowerCase().endsWith('.avro')) {
-        const result = await this._getAvroNetwork(props)
+        const result = (await this._getAvroNetwork(props)) as any
+        if (!result) reject('Problem loading network: ' + path)
         resolve(result)
         return
       }
 
+      // ------ side quest: get EPSG from output_config
+      const configEPSG = await this._getEPSGfromConfig()
+      // WASM XML -----------
+      if (
+        filename.toLocaleLowerCase().endsWith('.xml') ||
+        filename.toLocaleLowerCase().endsWith('.xml.gz')
+      ) {
+        try {
+          const promise: Promise<any> = new Promise<any>((resolve, reject) => {
+            const wasmWorker = new WasmXmlNetworkParser() // as unknown as any
+            wasmWorker.onmessage = (event: any) => {
+              const data = event.data
+              if ('requestCRS' in data) {
+                // No CRS in network. But if we have a CRS in output_config, use that!
+                if (configEPSG && configEPSG !== 'Atlantis') {
+                  data.confirmedCRS = configEPSG
+                  wasmWorker.postMessage({ confirmedCRS: configEPSG })
+                  return
+                }
+                // We need to ask the user.
+                const msg = data.requestCRS ? '"Atlantis" coordinates found. ' : ''
+                let crs =
+                  prompt(
+                    `Enter EPSG projection code.\n\n${msg}Enter projection, e.g. EPSG:25832, or cancel to load without a base map.`
+                  ) || 'Atlantis'
+                if (Number.isInteger(parseInt(crs))) crs = `EPSG:${crs}`
+                wasmWorker.postMessage({ confirmedCRS: crs })
+                return
+              }
+              if (data.error) reject(data.error)
+              if (data.status && cbStatus) {
+                cbStatus(data.status)
+                return
+              }
+              resolve(data.network)
+            }
+            wasmWorker.postMessage({
+              path,
+              crs: options.crs || '',
+              fsConfig: this.fileApi,
+              options,
+            })
+          })
+          const network = await promise
+          resolve(network)
+        } catch (e) {
+          console.error(e)
+          reject(e)
+        } finally {
+          return
+        }
+      }
+
+      // OTHER: GEOJSON, SHAPEFILE, ...
       const thread = new RoadNetworkLoader() as any
       try {
         thread.onmessage = (e: MessageEvent) => {
@@ -743,7 +817,6 @@ export default class DashboardDataManager {
         thread.postMessage({
           filePath: path,
           fileSystem: this.fileApi,
-          vizDetails,
           options,
           extraColumns: !!props.extra, // include freespeed, length (off by default!)
           isFirefox, // we need this for now, because Firefox bug #260
