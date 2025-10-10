@@ -35,7 +35,7 @@
     //- LEGEND -------------------------------------------
     .panel-area.flex-col(v-if="colorThresholds && colorThresholds.breakpoints")
       .flex-row(style="margin-bottom: 2px")
-        h4.flex1 Legend
+        h4.flex1.legend-header Legend
         button.is-small.button(style="padding: 0 0.25rem; border: none" @click="isEditingLegend = !isEditingLegend")
           i.fa(:class="isEditingLegend ? 'fa-check':'fa-edit'")
           span &nbsp;{{ isEditingLegend ? 'done':'edit' }}
@@ -80,7 +80,7 @@
   .right-container
     .map-holder(oncontextmenu="return false")
 
-      zone-layer.zone-layer.fill-it(
+      zone-layer.zone-layer.fill-it(v-if="features.length"
         :viewId="layerId"
         :features="features"
         :clickedZone="clickedZone"
@@ -90,7 +90,7 @@
         :isLoading="isLoading"
       )
 
-      background-map-on-top(v-if="isMapReady")
+      //- background-map-on-top(v-if="isMapReady")
       zoom-buttons(corner="top-left")
 
       //- .zone-announce-area.flex-col
@@ -107,7 +107,7 @@
         p &nbsp;
         p Switch to the table view to inspect the full matrix in tabular or heatmap view.
 
-      .tooltip-area(v-if="tooltip && !isLoading" v-html="tooltip")
+      .tooltip-area(v-show="tooltip && !isLoading" v-html="tooltip" :style="tooltipStyle")
 
       p.tooltip-area(v-if="isLoading" style="padding: 1.25rem"): b LOADING...
 
@@ -129,7 +129,7 @@ import naturalSort from 'javascript-natural-sort'
 import globalStore from '@/store'
 import { gUnzip } from '@/js/util'
 import HTTPFileSystem from '@/js/HTTPFileSystem'
-import { DEFAULT_PROJECTION, REACT_VIEW_HANDLES } from '@/Globals'
+import { DEFAULT_PROJECTION } from '@/Globals'
 
 import BackgroundMapOnTop from '@/components/BackgroundMapOnTop.vue'
 import ZoomButtons from '@/components/ZoomButtons.vue'
@@ -137,15 +137,13 @@ import { Style, buildRGBfromHexCodes, getColorRampHexCodes } from '@/js/ColorsAn
 
 import { H5WasmLocalFileApi } from './local/h5wasm-local-file-api'
 
-import ZoneLayer from './ZoneLayer'
-import { MapConfig, ZoneSystems } from './MatrixViewer.vue'
 import LegendColors from './LegendColors.vue'
-import type { Matrix } from './H5Provider'
+import ZoneLayer from './DeckMapComponent.vue'
+import { MapConfig, Matrix, ZoneSystems } from './MatrixViewer.vue'
+import { ScaleType } from '@/components/ColorMapSelector/models-vis'
 
 import dataScalers from './util'
 import { debounce } from '@/js/util'
-
-import { ScaleType } from '@/components/ColorMapSelector/models-vis'
 
 naturalSort.insensitive = true
 
@@ -164,7 +162,7 @@ const MyComponent = defineComponent({
     filenameShapes: String,
     thumbnail: Boolean,
     isInvertedColor: Boolean,
-    shapes: { type: Array, required: false },
+    shapes: { type: Array, required: true },
     mapConfig: { type: Object as PropType<MapConfig>, required: true },
     zoneSystems: { type: Object as PropType<ZoneSystems>, required: true },
     tazToOffsetLookup: {
@@ -206,17 +204,13 @@ const MyComponent = defineComponent({
       statusText: 'Loading...',
       tableKeys: [] as { key: string; name: string }[],
       tooltip: '',
+      tooltipStyle: { top: '0px', left: '0px' },
       useConfig: '',
       zoneID: 'TAZ',
       filterExplanation:
         'Some matrices have "N/A" values coded with magic numbers like -999.\n\n' +
         'Enter comma-separated list of such values to be ignored when calculating colors and breakpoints.',
     }
-  },
-
-  beforeDestroy() {
-    // MUST delete the React view handles to prevent gigantic memory leaks!
-    delete REACT_VIEW_HANDLES[this.layerId]
   },
 
   async mounted() {
@@ -254,23 +248,6 @@ const MyComponent = defineComponent({
   },
 
   watch: {
-    'globalState.viewState'() {
-      if (!this.isMapReady) return
-      if (!REACT_VIEW_HANDLES[this.layerId]) return
-
-      REACT_VIEW_HANDLES[this.layerId]()
-
-      const { latitude, longitude, zoom, bearing, pitch } = this.globalState.viewState
-      localStorage.setItem(
-        'H5MapViewer_view',
-        JSON.stringify({ latitude, longitude, zoom, bearing, pitch })
-      )
-    },
-
-    'globalState.isDarkMode'() {
-      // this.embedChart()
-    },
-
     activeZone() {
       this.dbExtractH5ArrayData()
       this.updateQuery()
@@ -428,7 +405,7 @@ const MyComponent = defineComponent({
     },
 
     async setupBoundaries() {
-      if (this.shapes) {
+      if (this.shapes.length) {
         // Shapes may already be dropped in from drag/drop
         this.features = this.shapes
         this.zoneID = this.userSuppliedZoneID || 'TAZ'
@@ -440,11 +417,12 @@ const MyComponent = defineComponent({
         await this.loadBoundariesBasedOnMatrixSize()
       }
 
+      if (this.features.length) this.$emit('hasShapes', true)
       this.setMapCenter()
     },
 
-    showTooltip(props: { index: number; object: any }) {
-      const { index, object } = props
+    showTooltip(props: { index: number; object: any; x: number; y: number }) {
+      const { index, object, x, y } = props
       const id = object?.properties[this.zoneID]
 
       if (id === undefined) {
@@ -465,6 +443,8 @@ const MyComponent = defineComponent({
         return
       }
 
+      this.tooltipStyle = { left: `${x + 12}px`, top: `${y + 12}px` }
+
       // console.log({ value, tableName })
 
       if (this.mapConfig.isRowWise) {
@@ -484,7 +464,8 @@ const MyComponent = defineComponent({
     setMapCenter() {
       const previousView = localStorage.getItem('H5MapViewer_view')
       if (previousView) {
-        this.$store.commit('setMapCamera', JSON.parse(previousView))
+        const view = JSON.parse(previousView)
+        this.$store.commit('setMapCamera', Object.assign(view))
         return
       }
 
@@ -505,7 +486,7 @@ const MyComponent = defineComponent({
         })
         .reduce((a, b) => [a[0] + b[0], a[1] + b[1]], [0, 0])
         .map((p: number) => p / aFewFeatures.length)
-      this.$store.commit('setMapCamera', { longitude: points[0], latitude: points[1], zoom: 7 })
+      this.$store.commit('setMapCamera', { center: points, zoom: 7 })
     },
 
     setPrettyValuesForArray(array: any[]) {
@@ -717,7 +698,7 @@ const MyComponent = defineComponent({
         this.statusText = ''
       }
 
-      if (!this.features) throw Error(`No "features" found in shapes file`)
+      if (!this.features.length) throw Error(`No "features" found in shapes file`)
     },
 
     async loadShapefileFeatures(filename: string) {
@@ -818,7 +799,7 @@ const MyComponent = defineComponent({
         pitch: 0,
         zoom: 9,
         center: [longitude, latitude],
-        initial: true,
+        // initial: true,
       })
 
       return geojson.features as any[]
@@ -894,6 +875,7 @@ $bgLightCyan: var(--bgMapWater); //  // #f5fbf0;
 }
 
 .left-bar {
+  z-index: 10;
   color: var(--text);
   background-color: var(--bgPanel);
   display: flex;
@@ -1014,9 +996,9 @@ $bgLightCyan: var(--bgMapWater); //  // #f5fbf0;
 
 .tooltip-area {
   position: absolute;
-  z-index: 30000;
-  left: 0.5rem;
-  bottom: 0.5rem;
+  top: 0;
+  left: 0;
+  z-index: 5;
   padding: 0.5rem;
   background-color: var(--bgBold);
   min-width: 10rem;
@@ -1025,6 +1007,8 @@ $bgLightCyan: var(--bgMapWater); //  // #f5fbf0;
   font-size: 0.9rem;
   user-select: none;
   border: 1px solid #88888855;
+  filter: drop-shadow(2px 4px 5px #0002);
+  opacity: 0.92;
 }
 
 .click-zone-hint {

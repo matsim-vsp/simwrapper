@@ -20,7 +20,7 @@
             :selectedFeatures="selectedFeatures"
             :stopMarkers="stopMarkers"
             :handleClickEvent="handleMapClick"
-            :pieSlider="pieSlider"
+            :pieSlider="pieSlider || 0"
             :widthSlider="widthSlider"
             :transitLines="activeTransitLines"
             :vizDetails="vizDetails"
@@ -35,7 +35,7 @@
               img.icon-pie-slider(v-if="crossFilters.length" :src="icons.piechart")
               b-slider.pie-slider(v-if="crossFilters.length" type="is-success" :tooltip="false" size="is-small"  v-model="pieSlider")
 
-          zoom-buttons
+          zoom-buttons(corner="top-left")
 
           .status-corner.flex-col(v-if="loadingText" :style="{'height': networkOptions.length ? '15rem':'5rem'}")
             p {{ loadingText }}
@@ -125,18 +125,12 @@ import TransitSupplyWorker from './TransitSupplyHelper.worker?worker'
 import DrawingTool from '@/components/DrawingTool/DrawingTool.vue'
 import ZoomButtons from '@/components/ZoomButtons.vue'
 import DashboardDataManager from '@/js/DashboardDataManager'
-import TransitLayers from './TransitLayers'
+import TransitLayers from './DeckMapComponent.vue'
 import LegendBox from './LegendBox.vue'
 import RouteDropDown from './RouteDropDown.vue'
 import LazyList from './LazyList.vue'
 
-import {
-  FileSystem,
-  FileSystemConfig,
-  ColorScheme,
-  VisualizationPlugin,
-  REACT_VIEW_HANDLES,
-} from '@/Globals'
+import { FileSystem, FileSystemConfig, ColorScheme, VisualizationPlugin } from '@/Globals'
 
 import GzipWorker from '@/workers/GzipFetcher.worker?worker'
 import IconPieChart from './assets/icon-pie-chart.png'
@@ -358,7 +352,6 @@ const MyComponent = defineComponent({
       transitLines: [] as TransitLine[],
       highlightedTransitLineIds: new Set(),
 
-      _roadFetcher: {} as any,
       _transitFetcher: {} as any,
       _transitHelper: {} as any,
 
@@ -367,7 +360,6 @@ const MyComponent = defineComponent({
 
       resolvers: {} as { [id: number]: any },
       resolverId: 0,
-      xmlWorker: null as null | Worker,
       crossFilters: [] as {
         cfDemand: crossfilter.Crossfilter<any>
         cfDemandLink: crossfilter.Dimension<any, any>
@@ -506,11 +498,6 @@ const MyComponent = defineComponent({
   },
 
   watch: {
-    '$store.state.viewState'() {
-      if (!REACT_VIEW_HANDLES[this.viewId]) return
-      REACT_VIEW_HANDLES[this.viewId]()
-    },
-
     '$store.state.colorScheme'() {
       this.isDarkMode = this.$store.state.colorScheme === ColorScheme.DarkMode
       this.highlightAllAttachedRoutes()
@@ -1285,7 +1272,6 @@ const MyComponent = defineComponent({
       this.incrementLoadProgress()
 
       // spawn transit helper web worker
-      this._transitHelper = new TransitSupplyWorker()
 
       this._transitHelper.onmessage = (buffer: MessageEvent) => {
         this.receivedProcessedTransit(buffer)
@@ -1380,21 +1366,17 @@ const MyComponent = defineComponent({
       this.drawMetric()
       this.handleClickedMetric({ field: 'departures' })
 
-      const longitude = 0.5 * (this._mapExtentXYXY[0] + this._mapExtentXYXY[2])
-      const latitude = 0.5 * (this._mapExtentXYXY[1] + this._mapExtentXYXY[3])
+      const lon = 0.5 * (this._mapExtentXYXY[0] + this._mapExtentXYXY[2])
+      const lat = 0.5 * (this._mapExtentXYXY[1] + this._mapExtentXYXY[3])
       const span = Math.abs(this._mapExtentXYXY[0] - this._mapExtentXYXY[2])
-      const zoom = span ? Math.floor(Math.log2(360 / span)) : 9
-
+      let zoom = span ? Math.floor(Math.log2(360 / span)) : 9
       this.$store.commit('setMapCamera', {
-        longitude,
-        latitude,
+        center: [lon, lat],
         zoom,
         bearing: 0,
         pitch: 0,
-        initial: true,
+        // initial: true,
       })
-
-      localStorage.setItem(this.$route.fullPath + '-bounds', JSON.stringify(this._mapExtentXYXY))
 
       const demand = this.vizDetails.demand || this.vizDetails.ptStop2stopFile
       if (demand) await this.loadDemandData(demand)
@@ -1851,7 +1833,6 @@ const MyComponent = defineComponent({
     this.debounceHandleSearchText = debounce(this.handleSearchText, 350)
     this.clearData()
 
-    this._roadFetcher = new NewXmlFetcher()
     this._transitFetcher = new NewXmlFetcher()
     this._transitHelper = new TransitSupplyWorker()
 
@@ -1872,14 +1853,11 @@ const MyComponent = defineComponent({
   },
 
   beforeDestroy() {
+    console.log('DESTROYING')
     this.clearData()
 
-    if (this.xmlWorker) this.xmlWorker.terminate()
-    if (this._roadFetcher) this._roadFetcher.terminate()
-    if (this._transitFetcher) this._transitFetcher.terminate()
-    if (this._transitHelper) this._transitHelper.terminate()
-
-    this.$store.commit('setFullScreen', false)
+    this._transitFetcher?.terminate()
+    this._transitHelper?.terminate()
   },
 })
 
@@ -2269,6 +2247,7 @@ h3 {
   left: 0;
   user-select: none;
   border-top-right-radius: 5px;
+  z-index: 10;
 }
 
 .icon-blue-ramp {

@@ -1,11 +1,12 @@
 <template lang="pug">
-.matrix-viewer(v-if="!thumbnail")
-  config-panel(v-if="activeTable"
+.matrix-viewer
+  config-panel(v-show="activeTable"
     :isMap="isMap"
+    :hasShapes="hasShapes"
     :mapConfig="mapConfig"
     :comparators="comparators"
     :compareLabel="compareLabel"
-    :catalog="h5Main?.catalog || []"
+    :catalog="catalog"
     :activeTable="activeTable"
     @changeMatrix="changeMatrix"
     @setMap="setMap"
@@ -14,6 +15,7 @@
     @changeScale="changeScale"
     @compare="compareToBase"
     @toggleComparePicker="toggleComparePicker"
+    @hasShapes="hasShapes=$event"
   )
 
   .getting-matrices(v-if="isGettingMatrices")
@@ -30,9 +32,9 @@
   )
 
     .status-text(v-if="statusText")
-      h4 {{ statusText }}
+      h4(v-html="statusText")
 
-    H5Map-viewer.fill-it(v-if="isMap && h5Main?.size"
+    H5Map-viewer.fill-it(v-if="isMap && matrixSize"
       :fileApi="fileApi"
       :fileSystem="fileSystem"
       :subfolder="subfolder"
@@ -42,7 +44,7 @@
       :filenameBase="filenameBase"
       :filenameShapes="filenameShapes"
       :matrices="matrices"
-      :matrixSize="h5Main?.size || 0"
+      :matrixSize="matrixSize"
       :shapes="shapes"
       :userSuppliedZoneID="zoneID"
       :mapConfig="mapConfig"
@@ -50,9 +52,10 @@
       :tazToOffsetLookup="h5zoneLookup"
       @nozones="isMap=false"
       @changeRowWise="changeRowWise"
-      )
+      @hasShapes="hasShapes=$event"
+    )
 
-    h5-table-viewer.fill-it.h5-table-viewer(v-if="h5fileBlob && !isMap"
+    H5TableViewer.fill-it.h5-table-viewer(v-if="h5fileBlob && !isMap"
       :filename="filename"
       :blob="h5fileBlob"
     )
@@ -69,23 +72,30 @@
 import { defineComponent } from 'vue'
 
 import YAML from 'yaml'
+import * as Comlink from 'comlink'
 import { debounce } from 'debounce'
-import { Dataset, File as H5WasmFile, Group as H5WasmGroup, ready as h5wasmReady } from 'h5wasm'
 
 import globalStore from '@/store'
 import { FileSystemConfig } from '@/Globals'
 import HTTPFileSystem from '@/js/HTTPFileSystem'
 import { gUnzip } from '@/js/util'
+import Geotools from '@/js/geo-utils'
 
-import H5TableViewer from './H5TableViewer'
-import H5MapViewer from './H5MapViewer.vue'
 import ConfigPanel from './ConfigPanel.vue'
+import H5TableViewer from './H5TableReactWrapper.vue'
+import H5MapViewer from './H5MapViewer.vue'
+import CompareFilePicker from './CompareFilePicker.vue'
 
 import { ColorMap } from '@/components/ColorMapSelector/models'
 import { ScaleType } from '@/components/ScaleSelector/ScaleOption'
 import { COLORMAP_GROUPS } from '@/components/ColorMapSelector/groups'
-import CompareFilePicker from './CompareFilePicker.vue'
-import H5Provider, { Matrix } from './H5Provider'
+import H5ProviderWorker from './H5ProviderWorker.worker?worker'
+
+export interface Matrix {
+  path: string
+  table: string
+  data: Float32Array | Float64Array | number[]
+}
 
 export interface ComparisonMatrix {
   root: string
@@ -115,7 +125,7 @@ const BASE_URL = import.meta.env.BASE_URL
 
 const MyComponent = defineComponent({
   name: 'MatrixViewer',
-  components: { H5TableViewer, H5MapViewer, ConfigPanel, CompareFilePicker },
+  components: { H5MapViewer, H5TableViewer, ConfigPanel, CompareFilePicker },
   props: {
     root: { type: String, required: true },
     subfolder: { type: String, required: true },
@@ -129,9 +139,11 @@ const MyComponent = defineComponent({
     return {
       title: '',
       description: '',
+      catalog: [] as string[],
       config: null as any,
       comparators: [] as ComparisonMatrix[],
       compareLabel: 'Compare...',
+      hasShapes: false,
       isDragging: false,
       isMap: true,
       isGettingMatrices: false,
@@ -143,10 +155,15 @@ const MyComponent = defineComponent({
       filename: '',
       filenameShapes: '',
       filenameBase: '',
-      h5Main: null as null | H5Provider,
-      h5Compare: null as null | H5Provider,
+
+      h5Main: null as any,
+      h5MainWorker: null as null | Worker,
+      h5Compare: null as any,
+      h5CompareWorker: null as null | Worker,
+
       matrices: {} as { [key: string]: Matrix },
-      shapes: null as null | any[],
+      matrixSize: 0,
+      shapes: [] as any[],
       useConfig: '',
       vizDetails: {
         title: '',
@@ -171,6 +188,22 @@ const MyComponent = defineComponent({
     }
   },
 
+  beforeDestroy() {
+    this.h5Main = null
+    this.h5MainWorker?.terminate()
+    this.h5Compare = null
+    this.h5CompareWorker?.terminate()
+
+    this.config = null
+    this.comparators = []
+    this.h5fileBlob = null
+    this.h5baseBlob = null
+    this.h5zoneLookup = {}
+    this.matrices = {}
+    this.shapes = []
+    this.zoneSystems = { byID: {}, bySize: {} }
+  },
+
   async mounted() {
     this.debounceDragEnd = debounce(this.dragEnd, 500)
     this.useConfig = this.config || this.yamlConfig || '' // use whichever one was sent to us
@@ -191,21 +224,22 @@ const MyComponent = defineComponent({
     this.$emit('isLoaded')
 
     this.comparators = this.setupComparisons()
+
     this.shapes = await this.loadShapes()
+    if (this.shapes.length) this.hasShapes = true
 
     try {
       await this.initH5Files()
       if (!this.h5Main) return
 
       this.h5zoneLookup = await this.buildTAZLookup()
-      let initialTable =
-        `${this.$route.query.table}` ||
-        localStorage.getItem('matrix-initial-table') ||
-        this.h5Main?.catalog[0]
+      let initialTable = this.$route.query.table || localStorage.getItem('matrix-initial-table')
+      if (!initialTable) initialTable = await this.h5Main.catalog[0]
 
       // if saved table is not in THIS matrix, revert to first table
-      if (initialTable && !this.h5Main.catalog.includes(initialTable)) {
-        initialTable = this.h5Main?.catalog[0]
+      const catalog = await this.h5Main.getCatalog()
+      if (initialTable && !catalog?.includes(initialTable)) {
+        initialTable = catalog[0]
       }
 
       if (initialTable) await this.changeMatrix(initialTable)
@@ -250,6 +284,12 @@ const MyComponent = defineComponent({
     subfolder() {
       this.getVizDetails()
     },
+
+    async h5Main() {
+      if (!this.h5Main) return
+      this.catalog = await this.h5Main.getCatalog()
+      this.matrixSize = await this.h5Main.getSize()
+    },
   },
 
   methods: {
@@ -265,27 +305,16 @@ const MyComponent = defineComponent({
 
     async buildH5Blob() {
       // we are going to fabricate an HDF5 file with the current matrix content!
-      const { FS } = await h5wasmReady
-      let f = new H5WasmFile('matrix', 'w')
-      const size = Math.floor(Math.sqrt(this.matrices.main.data.length))
+      const buffer = await this.h5Main.buildH5Buffer({
+        size: Math.floor(Math.sqrt(this.matrices.main.data.length)),
+        main: this.matrices.main.data,
+        base: this.matrices.base?.data,
+        diff: this.matrices.diff?.data,
+      })
 
-      f.create_dataset({ name: `A: Values`, data: this.matrices.main.data, shape: [size, size] })
-
-      if (this.matrices.diff) {
-        f.create_dataset({ name: `B: Compare`, data: this.matrices.base.data, shape: [size, size] })
-        f.create_dataset({
-          name: `C: Diff A-B`,
-          data: this.matrices.diff.data,
-          shape: [size, size],
-        })
-      }
-
-      f.flush()
-      f.close()
-
+      const uint8 = new Uint8Array(buffer)
       const tableLabel = this.activeTable.replaceAll('&nbsp;', ' ')
-      const fileData = FS.readFile('matrix')
-      const blob = new File([fileData], tableLabel, { type: 'application/octet-stream' })
+      const blob = new File([uint8], tableLabel, { type: 'application/octet-stream' })
       return blob
     },
 
@@ -328,7 +357,7 @@ const MyComponent = defineComponent({
             matrices.base = baseMatrix
 
             const diff = new Float32Array(mainMatrix.data.length)
-            mainMatrix.data.forEach((v, i) => {
+            mainMatrix.data.forEach((v: number, i: number) => {
               diff[i] = v - baseMatrix.data[i]
             })
             matrices.diff = {
@@ -350,7 +379,7 @@ const MyComponent = defineComponent({
 
     async initH5Files() {
       if (!this.yamlConfig) {
-        this.statusText = `Drop an HDF5 matrix file and GeoJSON boundary file here to view it`
+        this.statusText = `<h3>MATRIX VIEWER</h3><br/>Drop an <b>OMX/HDF5</b> matrix file here<br/><br/>or a <b>GeoJSON/GeoPackage/Shapefile.zip</b> zonal boundary<br/>file to view it on a map`
         return
       }
       if (!this.fileSystem) return
@@ -362,15 +391,17 @@ const MyComponent = defineComponent({
       this.filename = '' + this.yamlConfig
       if (this.config) this.filename = this.config.dataset
 
-      this.h5Main = new H5Provider({
+      this.h5MainWorker = new H5ProviderWorker()
+      this.h5Main = Comlink.wrap(this.h5MainWorker) as unknown
+
+      await this.h5Main.open({
         fileSystem: this.fileSystem,
         subfolder: this.subfolder,
         filename: this.filename,
       })
 
-      // this opens file, sets up the shape and matrix catalog
-      await this.h5Main.init()
-
+      this.catalog = await this.h5Main.getCatalog()
+      this.matrixSize = await this.h5Main.getSize()
       this.statusText = ''
     },
 
@@ -431,8 +462,8 @@ const MyComponent = defineComponent({
       this.updateQuery()
     },
 
-    async loadShapes() {
-      if (!this.vizDetails.shapes || !this.fileApi) return null
+    async loadShapes(): Promise<any[]> {
+      if (!this.vizDetails.shapes || !this.fileApi) return []
 
       // User passed in a geojson and column ID; use them.
       this.statusText = `Loading: ${this.vizDetails.shapes.file}...`
@@ -448,7 +479,7 @@ const MyComponent = defineComponent({
         this.$emit('error', 'Error loading ' + path)
         console.error('' + e)
       }
-      return null
+      return []
     },
 
     async loadYamlConfig() {
@@ -534,13 +565,15 @@ const MyComponent = defineComponent({
     async compareToBase(comparisonMatrix: ComparisonMatrix) {
       if (!this.fileSystem) return
 
-      this.h5Compare = new H5Provider({
+      this.h5CompareWorker?.terminate()
+      this.h5CompareWorker = new H5ProviderWorker()
+      this.h5Compare = Comlink.wrap(this.h5CompareWorker) as unknown
+
+      this.h5Compare.open({
         fileSystem: this.fileSystem,
         subfolder: comparisonMatrix.subfolder,
         filename: comparisonMatrix.filename,
       })
-
-      await this.h5Compare.init()
 
       // drag/drop mode, no "root" filesystem. Just set this as base.
       if (comparisonMatrix.root === '') {
@@ -585,11 +618,11 @@ const MyComponent = defineComponent({
         const file0 = files.item(0)
         if (!file0) return
 
-        if (/(geojson|geojson\.gz)$/.test(file0.name.toLocaleLowerCase())) {
-          console.log('GeoJSON!')
+        if (/(gpkg|json|json\.gz|zip|geojson|geojson\.gz)$/.test(file0.name.toLocaleLowerCase())) {
+          console.log('boundaries!')
           this.handleDroppedBoundaries(file0)
         } else {
-          console.log('Not GeoJSON!')
+          console.log('Not boundaries!')
           this.handleDroppedMatrix(file0)
         }
       } catch (e) {
@@ -622,25 +655,38 @@ const MyComponent = defineComponent({
       this.h5fileBlob = null
       await this.$nextTick()
 
-      this.h5Main = new H5Provider({
+      this.h5MainWorker?.terminate()
+      this.h5MainWorker = new H5ProviderWorker()
+      this.h5Main = Comlink.wrap(this.h5MainWorker) as unknown
+      // this opens file, sets up the dimensions and matrix catalog
+      await this.h5Main.open({
         file,
         subfolder: '',
         filename: this.filename,
       })
 
-      // this opens file, sets up the dimensions and matrix catalog
-      await this.h5Main.init()
-
       this.h5fileBlob = file
       this.filename = file.name || 'File'
       this.$emit('title', this.filename)
       this.setCompareLabel(file.name)
+
+      this.catalog = await this.h5Main.getCatalog()
+      this.matrixSize = await this.h5Main.getSize()
       this.statusText = ''
 
+      this.statusText = 'Building lookup table'
+      await this.$nextTick()
       this.h5zoneLookup = await this.buildTAZLookup()
 
-      const initialTable = localStorage.getItem('matrix-initial-table') || this.h5Main?.catalog[0]
+      this.statusText = ''
+
+      const initialTable = localStorage.getItem('matrix-initial-table') || this.catalog[0]
       if (initialTable) await this.changeMatrix(initialTable)
+
+      // no shapes yet? Just show matrix table
+      if (!this.shapes.length) {
+        this.isMap = false
+      }
     },
 
     async handleDroppedBoundaries(file: File) {
@@ -649,10 +695,26 @@ const MyComponent = defineComponent({
       await this.$nextTick()
 
       try {
-        const buffer = await file.arrayBuffer()
-        const rawtext = await gUnzip(buffer)
-        const text = new TextDecoder('utf-8').decode(rawtext)
-        const geojson = JSON.parse(text)
+        const name = file.name.toLocaleLowerCase()
+        let features = [] as any[]
+        // GeoPackage
+        if (name.endsWith('.gpkg')) {
+          const buffer = await file.arrayBuffer()
+          features = await Geotools.loadGeoPackageFromBuffer(buffer)
+        }
+        // Shapefile as .ZIP
+        else if (name.endsWith('.zip')) {
+          const buffer = await file.arrayBuffer()
+          features = await Geotools.loadShapefileFromBuffers({ zip: buffer })
+        }
+        // GeoJSON
+        else if (name.indexOf('json') > -1) {
+          const buffer = await file.arrayBuffer()
+          const rawtext = await gUnzip(buffer)
+          const text = new TextDecoder().decode(rawtext)
+          const geojson = JSON.parse(text)
+          features = geojson?.features
+        }
 
         const id = await new Promise<string>(resolve => {
           const m = prompt('ID / TAZ Column', 'TAZ') || 'TAZ'
@@ -660,10 +722,16 @@ const MyComponent = defineComponent({
         })
 
         this.filenameShapes = file.name || 'File'
-        this.shapes = geojson.features
+        this.shapes = features
         this.zoneID = id
-        this.statusText = this.h5fileBlob ? '' : `Shapes loaded. Drop an HDF5 file here to view it`
+        await this.$nextTick()
         this.isMap = true
+        this.statusText = ''
+        if (!this.h5fileBlob) {
+          this.statusText = `Shapes loaded. Now drop an HDF5 file here to view it`
+        } else {
+          this.changeMatrix(this.activeTable)
+        }
       } catch (e) {
         console.error('' + e)
       }
@@ -698,19 +766,16 @@ const MyComponent = defineComponent({
       if (!this.h5Main) return lookup
 
       // If "zone_number" array exists, build lookup from that
-      // console.log(this.h5Main.catalog)
-      if (this.h5Main?.catalog?.indexOf('zone_number') > -1) {
+      const catalog = await this.h5Main.getCatalog()
+      if (catalog?.indexOf('zone_number') > -1) {
         const zoneNumbers = await this.h5Main.getDataArray('zone_number')
-        // console.log({ zoneNumbers })
-        zoneNumbers.data.forEach((zone, offset) => {
+        zoneNumbers.data.forEach((zone: any, offset: number) => {
           lookup[zone] = offset
         })
       } else {
         // Otherwise assume numbers just increase
-        // console.log(this.h5Main?.size)
-        for (let i = 1; i <= this.h5Main.size; i++) {
-          lookup[i] = i - 1
-        }
+        const size = await this.h5Main.getSize()
+        for (let i = 1; i <= size; i++) lookup[i] = i - 1
       }
       return lookup
     },

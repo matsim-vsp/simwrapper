@@ -1,9 +1,5 @@
 <template lang="pug">
 .matrix-selector-panel
-  //- .flex-column
-  //-   //- p: b Matrix File
-  //-   b-input.binput.is-small(disabled placeholder="filename.h5" v-model="filename")
-
   //- Data/Map
   .flex-row
     b-field.which-data
@@ -11,13 +7,20 @@
                       @click="$emit('setMap',false)")
         i.fa.fa-border-none
         span &nbsp;Data
-      b-button.button.is-small(:type="isMap ? 'is-info' : 'is-info is-outlined'"
-                      @click="$emit('setMap',true)")
+      b-button.button.is-small(v-if="hasShapes"
+        :type="isMap ? 'is-info' : 'is-info is-outlined'"
+        @click="$emit('setMap',true)"
+      )
         i.fa.fa-map
         span &nbsp;Map
 
+
+  p.hint-boundaries.flex1(v-show="!hasShapes")
+    i.fa.fa-exclamation-triangle &nbsp;
+    | Drag/drop a zonal boundary file to enable map view
+
   //- TABLE Name
-  b-dropdown.dropdown-table-selector(
+  b-dropdown.dropdown-table-selector(v-if="hasShapes"
     @change="$emit('changeMatrix', $event)"
     scrollable max-height="400" trap-focus
   )
@@ -33,28 +36,19 @@
         v-html="matrix"
       )
 
-
   //- COMPARE selector
-  .flex-column(style="margin-left: 1rem")
+  .flex-column(v-if="hasShapes" style="margin-left: 1rem")
     b-button.is-small.is-white(@click="toggleCompareSelector()" v-html="compareLabel")
 
   //- Map configuration
   .flex-row.map-config(v-if="isMap")
-    ColorMapSelector(
+    BColorSelector(
       :value="mapConfig.colormap",
       :invert="mapConfig.isInvertedColor"
-      @onValueChange="$emit('changeColor', $event)"
-      @onInversionChange="$emit('changeColor', $event)"
+      :scale="mapConfig.scale"
+      @change="$emit('changeColor', $event)"
+      @changeScale="$emit('changeScale', $event)"
     )
-
-    ScaleSelector(
-      :options="COLOR_SCALE_TYPES"
-      :value="mapConfig.scale"
-      @onScaleChange="$emit('changeScale', $event)"
-    )
-
-  //- .flex-column.flex1.drop-hint
-  //-   p.right  Drag/drop an HDF5 file anywhere to open it
 
 </template>
 
@@ -62,35 +56,28 @@
 import { defineComponent } from 'vue'
 import type { PropType } from 'vue'
 
-import ColorMapSelector from '@/components/ColorMapSelector/ColorMapSelector'
-import { ColorMap } from '@/components/ColorMapSelector/models'
-import ScaleSelector from '@/components/ScaleSelector/ScaleSelector'
-import { ScaleType } from '@/components/ScaleSelector/ScaleOption'
+import BColorSelector from './BColorSelector.vue'
 import ComparisonSelector from './ComparisonSelector.vue'
-
-export type ColorScaleType = Exclude<ScaleType, 'gamma'>
-
 import { ComparisonMatrix, MapConfig } from './MatrixViewer.vue'
 
 const MyComponent = defineComponent({
-  name: 'MatrixViewer',
-  components: { ComparisonSelector, ScaleSelector, ColorMapSelector },
+  name: 'MatrixConfigPanel',
+  components: { ComparisonSelector, BColorSelector },
   props: {
     isMap: Boolean,
     comparators: { type: Array as PropType<ComparisonMatrix[]> },
     compareLabel: String,
+    hasShapes: { required: true, type: Boolean },
     catalog: { required: true, type: Array as PropType<string[]> },
     mapConfig: { type: Object as PropType<MapConfig> },
     selectedZone: Number,
     activeTable: { required: true, type: String },
   },
   data() {
-    const COLOR_SCALE_TYPES = [ScaleType.Linear, ScaleType.Log, ScaleType.SymLog, ScaleType.Sqrt]
     return {
       filename: '',
       filenameShapes: '',
       colormap: 'Viridis',
-      COLOR_SCALE_TYPES,
       currentCatalog: '',
       searchTableTerm: '',
     }
@@ -132,7 +119,6 @@ $bgDarkerCyan: #def3ec;
   padding: 0.5rem;
   background-color: var(--bg);
   border-bottom: 1px solid #bbbbcc88;
-  z-index: 200;
 }
 
 .flex-column {
@@ -173,5 +159,13 @@ $bgDarkerCyan: #def3ec;
   margin: 0 0 0 auto;
   color: var(--textBold);
   font-size: 0.9rem;
+}
+
+.hint-boundaries {
+  font-size: 0.9rem;
+  margin-top: 0.3rem;
+  margin-right: 0.8rem;
+  text-align: right;
+  opacity: 0.8;
 }
 </style>

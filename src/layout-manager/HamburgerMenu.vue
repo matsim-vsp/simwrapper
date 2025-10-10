@@ -5,18 +5,6 @@
     :class="{'is-highlighted': showSidebarMenu}"
   )
     i.fa.fa-bars
-      //- i.fas.fa-cog(@click="toggleSettings()")
-
-      //- img(:src="imgSidebar")
-    //- .simwrapper-logo
-    //-   img(:src="imgLogo")
-    //- p: b SimWrapper
-
-  //- .title-section.flex1
-  //-   p {{  $store.state.windowTitle }}
-
-  //- .right-section
-  //-   p: i.fas.fa-cog(@click="toggleSettings()")
 
   settings-panel.settings-popup(v-if="showSettings"
     @close="toggleSettings()"
@@ -46,9 +34,9 @@
 
     .space
       .xsection Tools
-      .x-item(@click="go('/map')")
-        p: i.x-menu-icon.fas.fa-map
-        p Map Builder
+      //- .x-item(@click="go('/map')")
+      //-   p: i.x-menu-icon.fas.fa-map
+      //-   p Map Builder
       .x-item(@click="go('/matrix')")
         p: i.x-menu-icon.fas.fa-th
         p Matrix Viewer
@@ -225,6 +213,7 @@ $appTag: #32926f;
   // background-image: linear-gradient(30deg, #425bda, #246a4f); // #801bec
   color: #eee;
   position: relative;
+  z-index: 1000;
 }
 
 .simwrapper-logo {
@@ -302,8 +291,8 @@ $appTag: #32926f;
   color: #333;
   filter: $filterShadow;
   padding: 0.25rem 4px 0.25rem 0;
-  z-index: 10002;
   width: max-content;
+  z-index: 20000;
 
   a {
     color: #333;
