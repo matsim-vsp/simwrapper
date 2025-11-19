@@ -15,6 +15,8 @@ import { PathStyleExtension } from '@deck.gl/extensions'
 
 import globalStore from '@/store'
 import MapTooltip from './MapTooltip.vue'
+import BackgroundLayers from '@/js/BackgroundLayers'
+import { buildRGBfromHexCodes } from '@/js/ColorsAndWidths'
 
 const BASE_URL = import.meta.env.BASE_URL
 
@@ -67,9 +69,10 @@ export default defineComponent({
   components: { MapTooltip },
   props: {
     activeTab: { type: String, required: true },
+    bgLayers: { type: Object as PropType<BackgroundLayers> },
     carrierServices: { type: Set },
-    carrierTours: { type: Array as PropType<LspShipmentChain[]>, required: true },
     center: { type: Array as PropType<number[]> },
+    colors: { type: Object, required: true },
     dark: { type: Boolean, required: true },
     depots: { type: Array as PropType<{ link: string; midpoint: number[]; coords: number[] }[]> },
     hubLocation: { type: Array as PropType<any[]>, required: true },
@@ -189,6 +192,9 @@ export default defineComponent({
     layers(): any[] {
       const layers = [] as any[]
 
+      const extraLayers = this.bgLayers?.layers()
+      if (extraLayers) layers.push(...extraLayers.layersBelow)
+
       if (this.activeTab == 'lspTours') {
         layers.push(...this.getLspTourLayers())
       }
@@ -230,6 +236,10 @@ export default defineComponent({
       if (this.activeTab == 'lspShipmentChains' && !this.showHub && this.hubLocation.length == 0) {
         layers.push(...this.getLspShipmentChainLayers())
       }
+
+      // ON-TOP layers
+      if (extraLayers) layers.push(...extraLayers.layersOnTop)
+
       return layers
     },
   },
@@ -244,12 +254,13 @@ export default defineComponent({
 
     const container = `map-${this.viewId}`
     const center = this.globalState.viewState.center as [number, number]
+    const zoom = this.globalState.viewState.zoom as number
     //@ts-ignore
     this.mymap = new maplibregl.Map({
       container,
       style,
       center,
-      zoom: 7,
+      zoom,
     })
     this.mymap.on('move', this.handleMove)
     this.mymap.on('style.load', () => {
@@ -383,50 +394,53 @@ export default defineComponent({
             }
           })
 
-          for (let i = 0; i < lspShipmentChain.route.length - 1; i++) {
-            newLayers.push(
-              //@ts-ignore:
-              new ArcLayer({
-                id: 'shipmenthubchains' + '_' + lspShipmentChain.shipmentId + '_route' + i,
-                data: [{}],
-                getSourcePosition: () => [
-                  lspShipmentChain.route[i][0],
-                  lspShipmentChain.route[i][1],
-                ],
-                getTargetPosition: () => [
-                  lspShipmentChain.route[i + 1][0],
-                  lspShipmentChain.route[i + 1][1],
-                ],
-                getSourceColor: this.getSourceColor(i, lspShipmentChain),
-                getTargetColor: this.getTargetColor(i, lspShipmentChain),
-                getWidth: this.getLineWidth(i, lspShipmentChain),
-                widthUnits: 'pixels',
-                getHeight: 0.5,
-                opacity: 0.9,
-                parameters: { depthTest: false },
-                widthMinPixels: 1,
-                widthMaxPixels: 100,
-                transitions: { getWidth: 200 },
-              } as any)
-            )
-            newLayers.push(
-              //@ts-ignore:
-              new ScatterplotLayer({
-                id: 'HubChainMarker' + '_' + lspShipmentChain.shipmentId + '_' + i,
-                data: [lspShipmentChain],
-                getPosition: () => [
-                  lspShipmentChain.route[lspShipmentChain.route.length - 1][0],
-                  lspShipmentChain.route[lspShipmentChain.route.length - 1][1],
-                ],
-                getFillColor: ActivityColor.pickup,
-                getRadius: 3,
-                opacity: 0.9,
-                parameters: { depthTest: false },
-                pickable: true,
-                radiusUnits: 'pixels',
-              } as any)
-            )
-          }
+          console.log('Adding 3x', lspShipmentChain.route.length, 'layers')
+          // for (let i = 0; i < lspShipmentChain.route.length - 1; i++) {
+          // build the i/j coordinate pair segments from the shipment chain route
+          const segments: any[] = lspShipmentChain.route
+            .map((r: any[], i: number) => {
+              if (!i) return null
+              return [r, lspShipmentChain.route[i - 1]]
+            })
+            .slice(1)
+
+          newLayers.push(
+            //@ts-ignore:
+            new ArcLayer({
+              id: 'shipmenthubchains' + '_' + lspShipmentChain.shipmentId,
+              data: segments,
+              getSourcePosition: (segment: any[]) => segment[0],
+              getTargetPosition: (segment: any[]) => segment[1],
+              getSourceColor: (_: any, i: number) => this.getSourceColor(i, lspShipmentChain),
+              getTargetColor: (_: any, i: number) => this.getTargetColor(i, lspShipmentChain),
+              getWidthColor: (_: any, i: number) => this.getLineWidth(i, lspShipmentChain),
+              widthUnits: 'pixels',
+              getHeight: 0.5,
+              opacity: 0.9,
+              parameters: { depthTest: false },
+              widthMinPixels: 1,
+              widthMaxPixels: 100,
+              transitions: { getWidth: 200 },
+            } as any)
+          )
+          newLayers.push(
+            //@ts-ignore:
+            new ScatterplotLayer({
+              id: 'HubChainMarker' + '_' + lspShipmentChain.shipmentId,
+              data: [lspShipmentChain],
+              getPosition: () => [
+                lspShipmentChain.route[lspShipmentChain.route.length - 1][0],
+                lspShipmentChain.route[lspShipmentChain.route.length - 1][1],
+              ],
+              getFillColor: ActivityColor.pickup,
+              getRadius: 3,
+              opacity: 0.9,
+              parameters: { depthTest: false },
+              pickable: true,
+              radiusUnits: 'pixels',
+            } as any)
+          )
+
           newLayers.push(
             //@ts-ignore:
             new ScatterplotLayer({
@@ -584,8 +598,8 @@ export default defineComponent({
               data: this.legs,
               getSourcePosition: (d: any) => d.points[0],
               getTargetPosition: (d: any) => d.points[d.points.length - 1],
-              getSourceColor: (d: any) => this.getLspTourColor(d.tour.vehicleId),
-              getTargetColor: (d: any) => this.getLspTourColor(d.tour.vehicleId),
+              getSourceColor: (d: any) => this.getLspTourColor(d.tour),
+              getTargetColor: (d: any) => this.getLspTourColor(d.tour),
               getWidth: this.settings.scaleFactor ? (d: any) => d.totalSize / 2 : 3,
               getHeight: 0.5,
               widthMinPixels: 2,
@@ -655,7 +669,7 @@ export default defineComponent({
               id: 'deliveryroutes1',
               data: this.legs,
               getPath: (d: any) => d.points,
-              getColor: (d: any) => this.getLspTourColor(d.tour.vehicleId),
+              getColor: (d: any) => this.getLspTourColor(d.tour),
               getWidth: this.settings.scaleFactor ? (d: any) => d.totalSize : 3,
               getOffset: 2, // 2: RIGHT-SIDE TRAFFIC
               opacity: 1,
@@ -741,11 +755,20 @@ export default defineComponent({
       return subLayers
     },
 
-    getLspTourColor(vehicleId: string) {
+    getLspTourColor(tour: { carrier: string; vehicleId: string }) {
+      // if user supplied carrier colors, use them
+      const fixedColor = this.colors[tour.carrier]
+      try {
+        if (fixedColor) {
+          const rgb = buildRGBfromHexCodes([fixedColor])
+          if (rgb) return rgb[0]
+        }
+      } catch {}
+
       // Simple hash function to generate a number from the string
       let hash = 0
-      for (let i = 0; i < vehicleId.length; i++) {
-        hash = vehicleId.charCodeAt(i) + ((hash << 5) - hash)
+      for (let i = 0; i < tour.vehicleId.length; i++) {
+        hash = tour.vehicleId.charCodeAt(i) + ((hash << 5) - hash)
       }
 
       // Generate RGB values by mapping parts of the hash to the 0-255 range

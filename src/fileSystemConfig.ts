@@ -19,7 +19,7 @@ if (typeof window !== 'undefined') {
  * supports OMX file slices and streaming large files!
  */
 export function addFlaskFilesystems(flaskEntries: { [id: string]: any }) {
-  const roots = Object.keys(flaskEntries)
+  const roots = Object.keys(flaskEntries).sort().reverse()
   for (const slug of roots) {
     const params = flaskEntries[slug]
     const fsconfig: FileSystemConfig = {
@@ -133,6 +133,15 @@ let fileSystems: FileSystemConfig[] = [
 
   // ----------- End. Below here, these are editable: -------------------
 
+  {
+    name: 'VSP/ZIB LakeFS',
+    hidden: true,
+    slug: 'vsp-zib',
+    description: 'Public VSP data at Zuse Institute Berlin',
+    baseURL: 'https://download.lake-daki.zib.de/?PATH=vsp&dir=matsim',
+    isZIB: true,
+    // 'https://download.lake-daki.zib.de/?PATH=vsp&dir=matsim%2Fcountries%2Fde%2Fberlin%2Fberlin-v6.4%2Foutput%2Fberlin-v6.4-10pct',
+  },
   {
     name: 'VSP TU-Berlin',
     slug: 'public',

@@ -20,6 +20,7 @@ import { MapboxOverlay } from '@deck.gl/mapbox'
 import { ArcLayer, ScatterplotLayer, IconLayer, TextLayer } from '@deck.gl/layers'
 import { PathStyleExtension } from '@deck.gl/extensions'
 import PathLayer from '@/layers/PathOffsetLayer'
+import BackgroundLayers from '@/js/BackgroundLayers'
 
 import globalStore from '@/store'
 import MapTooltip from './MapTooltip.vue'
@@ -51,13 +52,13 @@ export default defineComponent({
   components: { MapTooltip },
   props: {
     activeTab: { type: String, required: true },
+    bgLayers: { type: Object as PropType<BackgroundLayers> },
     dark: { type: Boolean, required: true },
     depots: { type: Array as PropType<{ link: string; midpoint: number[]; coords: number[] }[]> },
     legs: { type: Array, required: true },
     mapIsIndependent: { type: Boolean },
     numSelectedTours: { type: Number, required: true },
     onClick: { type: Function },
-    projection: { type: String, required: true },
     services: { type: Boolean, required: true },
     settings: {
       type: Object as PropType<{
@@ -126,6 +127,9 @@ export default defineComponent({
   computed: {
     layers() {
       const allLayers = [] as any[]
+
+      const extraLayers = this.bgLayers?.layers()
+      if (extraLayers) allLayers.push(...extraLayers.layersBelow)
 
       if (this.activeTab == 'tours') {
         allLayers.push(
@@ -382,6 +386,9 @@ export default defineComponent({
         } as any)
       )
 
+      // ON-TOP layers
+      if (extraLayers) allLayers.push(...extraLayers.layersOnTop)
+
       // all done! Phew
       return allLayers
     },
@@ -438,8 +445,7 @@ export default defineComponent({
     this.mymap.on('style.load', () => {
       this.deckOverlay = new MapboxOverlay({
         layers: this.layers,
-        // layers will just draw on top of each other
-        // interleaved: true
+        interleaved: true,
         onClick: this.handleClick,
       })
       this.mymap?.addControl(this.deckOverlay)

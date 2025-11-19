@@ -3,10 +3,14 @@
                 :style='{"background": urlThumbnail}'
                 oncontextmenu="return false")
 
-  .container-1
+  .container-1(
+      @mousemove="dividerDragging"
+      @mouseup="dividerDragEnd"
+  )
     .main-panel
       DeckMapComponent.anim(v-if="!thumbnail"
                   :activeTab="activeTab"
+                  :bgLayers="backgroundLayers"
                   :shipments="shownShipments"
                   :depots="shownDepots"
                   :legs="shownLegs"
@@ -18,12 +22,18 @@
                   :numSelectedTours="selectedTours.length"
                   :onClick="handleClick"
                   :projection="vizDetails.projection"
-                  :services="vizDetails.services")
+                  :services="vizDetails.services || false")
 
       ZoomButtons(v-if="!thumbnail" corner="top-left")
       .xmessage(v-if="myState.statusMessage") {{ myState.statusMessage }}
 
-    .right-panel(v-if="!thumbnail" :darkMode="true")
+    .dragger(
+        @mousedown="dividerDragStart"
+        @mouseup="dividerDragEnd"
+        @mousemove.stop="dividerDragging"
+    )
+
+    .right-panel(:darkMode="true" :style="{width: `${legendSectionWidth}px`}")
       h3(style="margin-left: 0.25rem" v-if="carriers.length") {{ $t('carriers') }}
 
       .carrier-list(data-testid="carrier-list")
@@ -114,6 +124,7 @@ const i18n = {
       shipmentDots: 'Show shipments',
       scaleSize: 'Widths',
       scaleFactor: 'Width',
+      service: 'Service',
     },
     de: {
       carriers: 'Unternehmen',
@@ -128,6 +139,7 @@ const i18n = {
       shipmentDots: 'Show shipments',
       scaleSize: 'Widths',
       scaleFactor: 'Width',
+      service: 'Betrieb',
     },
   },
 }
@@ -149,6 +161,7 @@ import { gUnzip, parseXML, findMatchingGlobInFiles, arrayBufferToBase64 } from '
 import DashboardDataManager from '@/js/DashboardDataManager'
 import RoadNetworkLoader from '@/workers/RoadNetworkLoader.worker.ts?worker'
 import DeckMapComponent from './MapComponent.vue'
+import BackgroundLayers from '@/js/BackgroundLayers'
 
 import {
   FileSystem,
@@ -234,12 +247,18 @@ const CarrierPlugin = defineComponent({
         data: [] as any[],
       },
 
+      isDraggingDivider: 0,
+      dragStartWidth: 250,
+      legendSectionWidth: 275,
+
       // DataManager might be passed in from the dashboard; or we might be
       // in single-view mode, in which case we need to create one for ourselves
       myDataManager: this.datamanager || new DashboardDataManager(this.root, this.subfolder),
 
       searchTerm: '',
       searchEnabled: false,
+
+      backgroundLayers: null as BackgroundLayers | null,
 
       globalState: globalStore.state,
       isLoaded: true,
@@ -363,6 +382,21 @@ const CarrierPlugin = defineComponent({
   },
 
   methods: {
+    dividerDragStart(e: MouseEvent) {
+      this.isDraggingDivider = e.clientX
+      this.dragStartWidth = this.legendSectionWidth
+    },
+
+    dividerDragEnd(e: MouseEvent) {
+      this.isDraggingDivider = 0
+    },
+
+    dividerDragging(e: MouseEvent) {
+      if (!this.isDraggingDivider) return
+      const deltaX = this.isDraggingDivider - e.clientX
+      this.legendSectionWidth = Math.max(0, this.dragStartWidth + deltaX)
+    },
+
     handleSelectShipment(shipment: any) {
       // console.log({ shipment })
 
@@ -815,7 +849,6 @@ const CarrierPlugin = defineComponent({
           shipment.type = 'service'
 
           this.shipmentLookup[shipment.$id] = shipment
-          console.log(shipment)
         }
       } catch (e) {
         // if xy are missing, skip this -- just means network isn't loaded yet.
@@ -1215,6 +1248,18 @@ const CarrierPlugin = defineComponent({
 
     // Select the first tour if the tours are loaded
     if (this.tours.length) this.handleSelectTour(this.tours[0])
+
+    // background layers
+    try {
+      this.backgroundLayers = new BackgroundLayers({
+        vizDetails: this.vizDetails,
+        fileApi: this.fileApi,
+        subfolder: this.subfolder,
+      })
+      await this.backgroundLayers.initialLoad()
+    } catch (e) {
+      this.$emit('error', 'Error loading background layers')
+    }
   },
 
   beforeDestroy() {
@@ -1235,21 +1280,12 @@ export default CarrierPlugin
    The emerging W3C standard is currently Firefox-only */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #454 $steelGray;
+  scrollbar-color: var(--bgBold) var(--bgPanel2);
 }
 
 /* And this works on Chrome/Edge/Safari */
 *::-webkit-scrollbar {
   width: 10px;
-}
-
-*::-webkit-scrollbar-track {
-  background: var(--bgPanel3);
-}
-
-*::-webkit-scrollbar-thumb {
-  background-color: var(--textVeryPale);
-  border-radius: 6px;
 }
 
 .carrier-viewer {
@@ -1261,8 +1297,11 @@ export default CarrierPlugin
 }
 
 .container-1 {
-  display: flex;
+  display: grid;
   height: 100%;
+  grid-template-columns: 1fr auto auto;
+  grid-template-rows: 1fr;
+  pointer-events: auto;
 }
 
 .carrier-viewer.hide-thumbnail {
@@ -1290,9 +1329,8 @@ h4 {
   font-size: 0.8rem;
   pointer-events: auto;
   background-color: var(--bgPanel3);
-  width: auto;
-  max-width: fit-content;
   padding: 0 0.25rem;
+  overflow-y: auto;
 }
 
 .nav {
@@ -1547,6 +1585,22 @@ input {
 
 .dropdown {
   margin-bottom: 0.5rem;
+}
+
+.dragger {
+  grid-row: 1 / 2;
+  grid-column: 2 / 3;
+  width: 0.4rem;
+  background-color: var(--bgBold);
+  user-select: none;
+}
+
+.dragger:hover,
+.dragger:active {
+  background-color: var(--sliderThumb);
+  transition: background-color 0.3s ease;
+  transition-delay: 0.1s;
+  cursor: ew-resize;
 }
 
 @media only screen and (max-width: 640px) {

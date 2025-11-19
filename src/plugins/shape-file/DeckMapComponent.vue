@@ -15,8 +15,7 @@ import globalStore from '@/store'
 import { LineOffsetLayer, OFFSET_DIRECTION } from '@/layers/LineOffsetLayer'
 import GeojsonOffsetLayer from '@/layers/GeojsonOffsetLayer'
 import Screenshots from '@/js/screenshots'
-
-import type { BackgroundLayer } from './ShapeFile.vue'
+import BackgroundLayers from '@/js/BackgroundLayers'
 
 const BASE_URL = import.meta.env.BASE_URL
 
@@ -30,7 +29,7 @@ export default defineComponent({
   name: 'GeojsonDeckComponent',
   props: {
     features: { type: Array },
-    bgLayers: { type: Object as PropType<{ [name: string]: BackgroundLayer }>, required: true },
+    bgLayers: { type: Object as PropType<BackgroundLayers> },
     cbTooltip: { type: Function, required: true },
     cbClickEvent: { type: Function, required: true },
     dark: { type: Boolean, required: true },
@@ -96,20 +95,24 @@ export default defineComponent({
       this.mymap?.setStyle(style)
     },
 
-    // 'globalState.viewState'() {
-    //   if (this.mapIsIndependent) return
-    //   const incoming = this.globalState.viewState as any
-    //   const mapcenter = this.mymap?.getCenter() as any
-    //   if (
-    //     incoming.longitude !== mapcenter.lng ||
-    //     incoming.latitude !== mapcenter.lat ||
-    //     incoming.zoom !== this.mymap?.getZoom() ||
-    //     incoming.pitch !== this.mymap?.getPitch() ||
-    //     incoming.bearing !== this.mymap?.getBearing()
-    //   ) {
-    //     this.mymap?.jumpTo(incoming)
-    //   }
-    // },
+    'globalState.viewState'() {
+      if (this.mapIsIndependent) return
+      const incoming = this.globalState.viewState as any
+      const center = this.mymap?.getCenter() as any
+      if (
+        incoming.longitude !== center.lng ||
+        incoming.latitude !== center.lat ||
+        incoming.zoom !== this.mymap?.getZoom() ||
+        incoming.pitch !== this.mymap?.getPitch() ||
+        incoming.bearing !== this.mymap?.getBearing()
+      ) {
+        const jump = Object.assign(
+          { center: { lng: incoming.longitude, lat: incoming.latitude } },
+          incoming
+        )
+        this.mymap?.jumpTo(jump)
+      }
+    },
   },
 
   computed: {
@@ -224,47 +227,6 @@ export default defineComponent({
     },
 
     // ================= LAYERS ================
-    // ================= LAYERS ================
-
-    extraLayers() {
-      const backgroundLayers = [] as any[]
-      const onTopLayers = [] as any[]
-
-      for (const name of Object.keys(this.bgLayers).reverse()) {
-        const layerDetails = this.bgLayers[name]
-
-        const bgLayer: any = new GeoJsonLayer({
-          id: `background-layer-${name}`,
-          data: layerDetails.features,
-          getFillColor: (d: any) => d.properties.__fill__,
-          getLineColor: layerDetails.borderColor,
-          getLineWidth: layerDetails.borderWidth,
-          getText: (d: any) => d.properties.label,
-          getTextSize: 12,
-          getTextColor: [255, 255, 255, 255],
-          getTextBackgroundColor: [0, 0, 0, 255],
-          pointType: 'circle+text',
-          textFontWeight: 'bold',
-          lineWidthUnits: 'pixels',
-          autohighlight: false,
-          opacity: layerDetails.opacity,
-          pickable: false,
-          stroked: layerDetails.borderWidth ? true : false,
-          fp64: false,
-          parameters: { depthTest: false },
-          visible: layerDetails.visible,
-        } as any)
-
-        if (layerDetails.onTop) {
-          onTopLayers.push(bgLayer)
-        } else {
-          // try this for now
-          bgLayer.beforeId = 'water'
-          backgroundLayers.push(bgLayer)
-        }
-      }
-      return { backgroundLayers, onTopLayers }
-    },
 
     lineLayers() {
       // POLYGON BORDER LAYER
@@ -336,7 +298,10 @@ export default defineComponent({
     },
 
     layers() {
-      const finalLayers = [...this.extraLayers.backgroundLayers]
+      const finalLayers = []
+
+      const extraLayers = this.bgLayers?.layers()
+      if (extraLayers) finalLayers.push(...extraLayers.layersBelow)
 
       // MAIN GEOJSON LAYER
       if (this.lineLayers.hasPolygons) {
@@ -353,7 +318,9 @@ export default defineComponent({
             getElevation: this.cbFillHeight,
             // settings: ------------------------
             extruded: !!this.fillHeights,
-            highlightedObjectIndex: this.highlightedLinkIndex,
+            highlightedObjectIndex:
+              this.highlightedLinkIndex == -1 ? null : this.highlightedLinkIndex,
+            autoHighlight: true,
             highlightColor: [255, 255, 255, 160],
             lineWidthUnits: 'pixels',
             lineWidthScale: 1,
@@ -366,8 +333,8 @@ export default defineComponent({
             pointRadiusMinPixels: 2,
             // pointRadiusMaxPixels: 50,
             stroked: this.isStroked,
-            useDevicePixels: this.isTakingScreenshot,
-            fp64: false,
+            // useDevicePixels: this.isTakingScreenshot,
+            // fp64: false,
             // material: false,
             updateTriggers: {
               getFillColor: this.fillColors,
@@ -441,7 +408,8 @@ export default defineComponent({
       }
 
       // ON-TOP layers
-      finalLayers.concat(this.extraLayers.onTopLayers)
+      if (extraLayers) finalLayers.push(...extraLayers.layersOnTop)
+
       // all done! whoosh!!
       return finalLayers
     },
@@ -459,13 +427,14 @@ export default defineComponent({
 
     const container = `map-${this.viewId}`
     const center = this.globalState.viewState.center as [number, number]
+    const zoom = this.globalState.viewState.zoom
 
     //@ts-ignore
     this.mymap = new maplibregl.Map({
       container,
       style,
       center,
-      zoom: 7,
+      zoom,
       canvasContextAttributes: { preserveDrawingBuffer: true },
     })
 
@@ -505,26 +474,6 @@ export default defineComponent({
       }
       globalStore.commit('setMapCamera', view)
     },
-
-    // oldgetTooltip(tip: { x: number; y: number; object: any }) {
-    //   console.log('tip', tip)
-    //   const { x, y, object } = tip
-
-    //   if (!object || !object.position || !object.position.length) {
-    //     this.tooltipStyle.display = 'none'
-    //     return
-    //   }
-
-    //   const lat = object.position[1]
-    //   const lng = object.position[0]
-    //   const html = `\
-    //     <b>tooltip</b> \
-    //   `
-    //   this.tooltipStyle.display = 'block'
-    //   this.tooltipStyle.top = `${y + 12}px`
-    //   this.tooltipStyle.left = `${x + 12}px`
-    //   this.tooltipHTML = html
-    // },
 
     getTooltip({ object, index }: { object: any; index: number }) {
       let offset = index
