@@ -9,7 +9,7 @@
   .dashboard-finder(:class="{isMultipanel, isZoomed}")
 
     //-- Vertical list of dashboard tabs -- one for each dashboard-*.yaml
-    ul.dashboard-right-sections(v-show="!isZoomed && Object.keys(dashboards).length > 1")
+    ul.dashboard-right-sections(v-show="!isZoomed && Object.keys(dashboards).length > 1 && !isMobile")
       li.tab-list(v-for="tab,index in Object.keys(dashboards)" :key="tab"
         :class="{'is-active': tab===activeTab, 'is-not-active': tab!==activeTab}"
         :style="{opacity: tab===activeTab ? 1.0 : 0.75}"
@@ -18,6 +18,20 @@
         a(v-if="dashboards[tab].header"
           @click="switchLeftTab(tab,index)"
         ) {{ dashboards[tab].header.tab }}
+
+    //- mobile: dashboard dropdown-button
+    .dashboard-mobile-section(v-show="!isZoomed && Object.keys(dashboards).length > 1 && isMobile")
+      .dropdown
+        b-button.dropbtn(@click="dropDownClicked()") {{ dashboards[activeTab].header.tab || 'Dashboards' }}
+          i.fa.fa-caret-down
+
+        .dropdown-content(v-if="showDropDown")
+          li(v-for="tab,index in Object.keys(dashboards)" :key="tab"
+            :class="{'is-active': tab===activeTab, 'is-not-active': tab!==activeTab}"
+            :style="{opacity: tab===activeTab ? 1.0 : 0.75}"
+            @click="switchLeftTab(tab,index)"
+          )
+            a(v-if="dashboards[tab].header" @click="switchLeftTab(tab,index)") {{ dashboards[tab].header.tab }}
 
     //-- The actual dashboard for this tab (if there is one) ------------------
     .dashboard-content(
@@ -103,6 +117,9 @@ export default defineComponent({
       pageHeader: '',
       showFooter: false,
       styleElement: null as any,
+      isMobile: false,
+      mediaQuery: null as any,
+      showDropDown: false,
       // project site navigation
       leftNavItems: null as null | {
         top: NavigationItem[]
@@ -558,6 +575,8 @@ export default defineComponent({
           this.$router.replace({ query: {} })
         }
       }, 125)
+
+      this.showDropDown = false
     },
 
     handleZoom(isZoomed: any) {
@@ -581,6 +600,14 @@ export default defineComponent({
       }
 
       return svnProject[0]
+    },
+
+    async dropDownClicked() {
+      if (this.showDropDown) {
+        this.showDropDown = false
+      } else {
+        this.showDropDown = true
+      }
     },
 
     goUpOneFolder() {
@@ -625,6 +652,12 @@ export default defineComponent({
   mounted() {
     this.updateRoute()
     this.setTitle()
+    this.mediaQuery = window.matchMedia('(max-width: 640px)')
+    if (this.mediaQuery.matches) {
+      this.isMobile = true
+    } else {
+      this.isMobile = false
+    }
   },
   beforeDestroy() {
     if (this.dashboardDataManager) this.dashboardDataManager.clearCache()
@@ -676,6 +709,12 @@ export default defineComponent({
 
 li.is-not-active b a {
   color: var(--textBlack);
+}
+
+@media screen and (max-width: 640px) {
+  .dashboard-finder {
+    flex-direction: column !important;
+  }
 }
 
 .dashboard-finder {
@@ -740,6 +779,7 @@ li.is-not-active b a {
   border-left: 5px solid var(--highlightActiveSection);
   border-radius: 5px 5px;
   font-weight: bold;
+
   a {
     color: var(--textBold);
   }
@@ -899,6 +939,7 @@ img {
 
 .white-text {
   color: white;
+
   h1,
   h2,
   h3,
@@ -906,6 +947,44 @@ img {
   h5,
   h6 {
     color: white;
+  }
+}
+
+.dropbtn {
+  background-color: $appTag;
+  color: white;
+  padding: 0 18px !important;
+  border: none;
+}
+
+.dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-content {
+  position: absolute;
+  background-color: #f1f1f1;
+  min-width: 100px;
+  box-shadow: 0px 8px 16px 0px rgba(0, 0, 0, 0.2);
+  z-index: 1;
+}
+
+.dropdown-content a {
+  color: black;
+  padding: 5px 5px;
+  text-decoration: none;
+  display: block;
+}
+
+.fa,
+.fas {
+  padding-left: 5px;
+}
+
+@media only screen and (max-width: 640px) {
+  .dashboard-mobile-section {
+    margin: 0rem 0.25rem -0.75rem 0.1rem;
   }
 }
 </style>
