@@ -1,0 +1,21 @@
+import{T as d,K as o}from"./layer-T9N9JmIf.js";import{d as u,n as m}from"./index-D_sw2g-2.js";import{t as g}from"./index-wQTTPj7C.js";import{L as h}from"./line-layer-BJTc6V-8.js";const f=[255,255,255],p=1,T=[1,0,0],S=[0,0,1];let y=0;class A{constructor(t={}){this.type="point";const{color:e=f}=t,{intensity:s=p}=t,{position:a=S}=t;this.id=t.id||`point-${y++}`,this.color=e,this.intensity=s,this.type="point",this.position=a,this.attenuation=v(t),this.projectedLight={...this}}getProjectedLight({layer:t}){const{projectedLight:e}=this,s=t.context.viewport,{coordinateSystem:a,coordinateOrigin:n}=t.props,r=d(this.position,{viewport:s,coordinateSystem:a,coordinateOrigin:n,fromCoordinateSystem:s.isGeospatial?o.LNGLAT:o.CARTESIAN,fromCoordinateOrigin:[0,0,0]});return e.color=this.color,e.intensity=this.intensity,e.position=r,e}}function v(i){return i.attenuation?i.attenuation:T}const E=u({name:"PlaybackControls",props:{isRunning:{type:Boolean,required:!0},timeStart:{type:Number,required:!0},timeEnd:{type:Number,required:!0},currentTime:{type:Number,required:!0}},data:i=>({pauseWhileDragging:!1,sliderValue:0,sliderOptions:{min:0,max:1e6,clickable:!1,duration:0,lazy:!0,tooltip:!1}}),mounted(){window.addEventListener("keyup",this.onKeyPressed)},beforeDestroy(){window.removeEventListener("keyup",this.onKeyPressed)},watch:{currentTime(){this.sliderValue=1e6*(this.currentTime-this.timeStart)/(this.timeEnd-this.timeStart)}},methods:{toggleSimulation(){this.$emit("click")},convertSecondsToClockTimeMinutes(i){const t=this.getSecondsFromSlider(i);try{const e=g(t),s=("00"+e.minutes).slice(-2);return`${e.hours}:${s}`}catch{return"00:00"}},dragStart(){this.isRunning&&(this.pauseWhileDragging=!0,this.$emit("click"))},dragEnd(){this.pauseWhileDragging&&this.$emit("click"),this.pauseWhileDragging=!1},dragging(i){this.$emit("time",this.getSecondsFromSlider(i))},onKeyPressed(i){i.code==="Space"&&this.toggleSimulation()},getSecondsFromSlider(i){let t=(this.timeEnd-this.timeStart)*i/1e6;return t===this.timeEnd&&(t=this.timeEnd-1),t}}});var L=function(){var t=this,e=t._self._c;return t._self._setupProxy,e("div",{staticClass:"slider-thingy"},[e("b-slider",t._b({staticClass:"slider",attrs:{size:"is-large"},on:{dragging:t.dragging,dragstart:t.dragStart,dragend:t.dragEnd},model:{value:t.sliderValue,callback:function(s){t.sliderValue=s},expression:"sliderValue"}},"b-slider",t.sliderOptions,!1)),e("div",{staticClass:"buttons"},[e("div",{staticClass:"playpause",on:{click:t.toggleSimulation}},[t.isRunning?e("i",{staticClass:"button-icon fa fa-1x fa-pause"}):e("i",{staticClass:"button-icon fa fa-1x fa-play"})])])],1)},_=[],b=m(E,L,_,!1,null,"ac23e3c7");const N=b.exports,C={getTimeStart:{type:"accessor",value:null},getTimeEnd:{type:"accessor",value:null},currentTime:{type:"number",value:0,min:0},searchFlag:{type:"number",value:0}},c=`uniform udataUniforms {
+  float currentTime;
+  float searchFlag;
+} udata;
+`,F={name:"udata",vs:c,fs:c,uniformTypes:{currentTime:"f32",searchFlag:"f32"}};class l extends h{getShaders(){const t=super.getShaders();return t.modules=[...t.modules,F],t.inject={"vs:#decl":`        in float timeStart;
+        in float timeEnd;
+        out float vTime;
+      `,"vs:#main-start":`        if (udata.searchFlag == 1.0) {
+          vTime = 999.0;
+        } else if(timeStart > udata.currentTime || timeEnd < udata.currentTime ) {
+          vTime = -1.0;
+          return;
+        } else {
+          float nearBeginning = udata.currentTime - timeStart;
+          float nearEnd = timeEnd - udata.currentTime;
+          vTime = min(nearBeginning, nearEnd);
+        }
+      `,"fs:#decl":`        in float vTime;
+      `,"fs:#main-start":`        if (udata.searchFlag == 0.0 && vTime == -1.0 ) discard;
+      `,"fs:DECKGL_FILTER_COLOR":`        if (udata.searchFlag == 0.0 && vTime <= 10.0) color.a *= (vTime / 10.0);
+      `},t}initializeState(){super.initializeState(),this.getAttributeManager()?.addInstanced({timeStart:{size:1,accessor:"getTimeStart"},timeEnd:{size:1,accessor:"getTimeEnd"}})}updateState(t){const{props:e,oldProps:s,changeFlags:a}=t;super.updateState(t);const n={currentTime:e.currentTime,searchFlag:e.searchFlag};for(const r of this.getModels())r.shaderInputs.setProps({udata:n})}}l.layerName="PathTraceLayer";l.defaultProps=C;export{l as P,A as a,N as b};
