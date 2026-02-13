@@ -14,6 +14,7 @@ import { debounce } from 'debounce'
 import globalStore from '@/store'
 import { CompleteMapData } from './GridMap.vue'
 import BackgroundLayers from '@/js/BackgroundLayers'
+import { disable3DBuildings, enable3DBuildings } from '@/js/maplibre/threeDBuildings'
 
 const BASE_URL = import.meta.env.BASE_URL
 
@@ -47,6 +48,7 @@ export default defineComponent({
     cbTooltip: { type: Function, required: true },
     onClick: { type: Function, required: false },
     bgLayers: { type: Object as PropType<BackgroundLayers> },
+    show3dBuildings: { type: Boolean, required: false, default: false },
   },
 
   data() {
@@ -77,6 +79,12 @@ export default defineComponent({
         this.globalState.isDarkMode ? 'dark' : 'positron'
       }.json` as any
       this.mymap?.setStyle(style)
+    },
+
+    show3dBuildings() {
+      if (!this.mymap) return
+      if (this.show3dBuildings) enable3DBuildings(this.mymap)
+      else disable3DBuildings(this.mymap)
     },
 
     'globalState.viewState'() {
@@ -180,6 +188,10 @@ export default defineComponent({
     })
     this.mymap.on('move', this.handleMove)
     this.mymap.on('style.load', () => {
+      if (this.show3dBuildings && this.mymap) {
+        enable3DBuildings(this.mymap)
+      }
+
       this.deckOverlay = new MapboxOverlay({
         interleaved: true,
         layers: this.layers,
@@ -202,7 +214,10 @@ export default defineComponent({
       }
 
       const currentData = this.data.mapData[this.currentTimeIndex]?.values
-      if (!currentData || !currentData[object.index]) return null
+      if (!currentData) return null
+      if (object.index == null || object.index < 0 || object.index >= currentData.length)
+        return null
+      if (!Number.isFinite(currentData[object.index])) return null
 
       const [lng, lat] = object.coordinate // Koordinaten (Längengrad, Breitengrad)
       const rawValue = currentData[object.index]
@@ -214,10 +229,8 @@ export default defineComponent({
       const lngDisplay = Number.isFinite(lng) ? lng.toFixed(4) : ''
 
       const tooltipHtml = `<b>${roundedValue} ${unit}</b><br/>${latDisplay} / ${lngDisplay}<br/>
-    time value: ${this.data.mapData[this.currentTimeIndex].time}<br/>
-    metric value: ${this.data.mapData[this.currentTimeIndex].values[object.index]}<br/>
-    opacity value: ${this.data.mapData[this.currentTimeIndex].opacityValues[object.index]}
     `
+      this.tooltipStyle.display = 'block'
       this.tooltipStyle.top = `${12 + Math.floor(object.y)}px`
       this.tooltipStyle.left = `${12 + Math.floor(object.x)}px`
       this.tooltipHTML = tooltipHtml
@@ -241,7 +254,7 @@ export default defineComponent({
     },
 
     handleClick(target: any, event: any) {
-      this.tooltipStyle.display = 'none'
+      this.tooltipHTML = ''
       if (this.onClick) this.onClick(target, event)
     },
   },

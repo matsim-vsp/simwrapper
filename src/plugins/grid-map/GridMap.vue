@@ -7,7 +7,13 @@
         :negativeValues="valuesIncludeNeg"
       )
 
-      zoom-buttons(v-if="!thumbnail && isLoaded" corner="top-left")
+      zoom-buttons(
+        v-if="!thumbnail && isLoaded"
+        corner="top-left"
+        :show3dToggle="true"
+        :is3dBuildings="show3dBuildings"
+        :onToggle3dBuildings="toggle3dBuildings"
+      )
 
       .top-right
         .gui-config(:id="configId")
@@ -86,6 +92,8 @@ interface VizDetail {
   projection: any
   thumbnail?: string
   elements?: string
+  buildings3d?: boolean
+  show3dBuildings?: boolean
   cellSize: number
   maxHeight: number
   userColorRamp: string
@@ -108,6 +116,7 @@ interface GuiConfig {
   radius: number
   opacity: number
   height: number
+  show3dBuildings: boolean
   'color ramp': string
   'upper bound': number
   'lower bound': number
@@ -152,6 +161,7 @@ interface MapProps {
   upperPercentile: number
   cbTooltip?: any
   bgLayers?: null | BackgroundLayers
+  show3dBuildings?: boolean
 }
 
 const i18n = {
@@ -210,7 +220,7 @@ const GridMap = defineComponent({
       'Reds',
       'RdYlGn (div)',
       'greenRed (div)',
-      'RdBu',
+      'RdBu (div)',
     ]
     return {
       id: Math.floor(1e12 * Math.random()),
@@ -285,6 +295,7 @@ const GridMap = defineComponent({
         radius: 150,
         opacity: 1,
         height: 100,
+        show3dBuildings: false,
         'color ramp': 'Viridis',
         'upper bound': 100,
         'lower bound': -100,
@@ -303,6 +314,7 @@ const GridMap = defineComponent({
       maxRadius: 500 as number,
       radiusStep: 5 as number,
       isLoaded: false as boolean,
+      show3dBuildings: false,
       thumbnailUrl: "url('assets/thumbnail.jpg') no-repeat;" as string,
       timeRange: [Infinity, -Infinity] as Number[],
       allTimes: [] as number[],
@@ -351,6 +363,7 @@ const GridMap = defineComponent({
         upperPercentile: 100,
         cbTooltip: this.cbTooltip,
         bgLayers: this.backgroundLayers,
+        show3dBuildings: this.show3dBuildings,
       }
     },
     textColor(): any {
@@ -378,6 +391,11 @@ const GridMap = defineComponent({
       tip.style.left = `${16 + object.devicePixel[0]}px`
       tip.style.bottom = `${16 + object.devicePixel[1]}px`
       this.tooltip = tip
+    },
+
+    toggle3dBuildings() {
+      this.show3dBuildings = !this.show3dBuildings
+      this.guiConfig.show3dBuildings = this.show3dBuildings
     },
 
     /**
@@ -449,9 +467,12 @@ const GridMap = defineComponent({
         }
         return new Uint8Array([255, 255, 255, 255])
       } else {
-        // Calculate the index based on the value and the number of colors in the array.
-        const index = Math.floor((value / 100) * (this.colors.length - 1))
-        // Return the selected color.
+        // Map 0..100 to equally sized bins across all configured colors.
+        // Using (length - 1) shifts breakpoints upward (e.g. with 2 colors the split is at 100).
+        const n = this.colors.length
+        if (!n) return [0, 0, 0, 0]
+        const clamped = Math.max(0, Math.min(100, value))
+        const index = Math.min(n - 1, Math.floor((clamped / 100) * n))
         return this.colors[index]
       }
     },
@@ -478,6 +499,10 @@ const GridMap = defineComponent({
         this.vizDetails = Object.assign({ colorRamp: '' }, this.config) as VizDetail
         this.setRadiusAndHeight()
         this.setCustomGuiConfig()
+        this.show3dBuildings = !!(
+          (this.vizDetails as any).buildings3d ?? (this.vizDetails as any).show3dBuildings
+        )
+        this.guiConfig.show3dBuildings = this.show3dBuildings
         return
       }
 
@@ -609,6 +634,10 @@ const GridMap = defineComponent({
       this.vizDetails = Object.assign({}, this.vizDetails, this.standaloneYAMLconfig)
 
       this.setRadiusAndHeight()
+      this.show3dBuildings = !!(
+        (this.vizDetails as any).buildings3d ?? (this.vizDetails as any).show3dBuildings
+      )
+      this.guiConfig.show3dBuildings = this.show3dBuildings
 
       const t = this.vizDetails.title ? this.vizDetails.title : 'Grid Map'
       this.$emit('title', t)
@@ -1012,7 +1041,7 @@ const GridMap = defineComponent({
     },
 
     handleDiscreteTimeValues(timeUpdate: { extent: number; index: number }) {
-      this.currentTime[0] = timeUpdate.extent
+      this.currentTime = [timeUpdate.extent, timeUpdate.extent]
       this.selectedTimeData = []
 
       for (let i = 0; i < this.data.mapData.length; i++) {
@@ -1054,6 +1083,10 @@ const GridMap = defineComponent({
       config.add(this.guiConfig, 'radius', this.minRadius, this.maxRadius, this.radiusStep)
       config.add(this.guiConfig, 'opacity', 0, 1, 0.1)
       config.add(this.guiConfig, 'height', 0, 250, 5)
+      config
+        .add(this.guiConfig, 'show3dBuildings')
+        .name('3D buildings')
+        .onChange((value: boolean) => (this.show3dBuildings = value))
 
       // Diff checkbox
       config
@@ -1168,16 +1201,48 @@ const GridMap = defineComponent({
     /*
      * This method is called when the first column is changed to update the data and colors.
      */
+    getCurrentSelectedTime(): number | null {
+      const selected = Number(this.currentTime?.[0])
+      return Number.isFinite(selected) ? selected : null
+    },
+
+    resolveSelectedTime(previousTime: number | null): number {
+      if (!this.allTimes.length) return 0
+
+      if (previousTime !== null && this.timeToIndex.has(previousTime as Number)) {
+        return previousTime
+      }
+
+      if (previousTime === null) return this.allTimes[0]
+
+      let closest = this.allTimes[0]
+      let minDistance = Math.abs(closest - previousTime)
+      for (let i = 1; i < this.allTimes.length; i++) {
+        const distance = Math.abs(this.allTimes[i] - previousTime)
+        if (distance < minDistance) {
+          minDistance = distance
+          closest = this.allTimes[i]
+        }
+      }
+      return closest
+    },
+
+    async reloadDataAndPreserveSelectedTime() {
+      const selectedTimeBeforeReload = this.getCurrentSelectedTime()
+      this.data = await this.loadAndPrepareData()
+      const selectedTimeAfterReload = this.resolveSelectedTime(selectedTimeBeforeReload)
+      this.currentTime = [selectedTimeAfterReload, selectedTimeAfterReload]
+      this.setColors()
+    },
+
     async handleOpacityColumnChange(newCol: string) {
       this.vizDetails.opacityColumn = newCol
-      this.data = await this.loadAndPrepareData()
-      this.setColors()
+      await this.reloadDataAndPreserveSelectedTime()
     },
 
     async handleColumnChange(newCol: string) {
       this.vizDetails.valueColumn = newCol
-      this.data = await this.loadAndPrepareData()
-      this.setColors()
+      await this.reloadDataAndPreserveSelectedTime()
     },
 
     /**
@@ -1186,13 +1251,8 @@ const GridMap = defineComponent({
     async handleDiffChange(useDiff: boolean) {
       this.vizDetails.diff = useDiff
 
-      // reload the data and set the colors
-      this.data = await this.loadAndPrepareData()
-      this.setColors()
-
-      // reset the slider to the last time slot
-      const last = this.allTimes[this.allTimes.length - 1]
-      this.currentTime = [last, last]
+      // reload data while keeping the currently selected time slot
+      await this.reloadDataAndPreserveSelectedTime()
     },
 
     windowResize() {
@@ -1210,13 +1270,8 @@ const GridMap = defineComponent({
     async handleSecondColumnChange(col2: string) {
       this.vizDetails.secondValueColumn = col2
 
-      // reload the data and set the colors
-      this.data = await this.loadAndPrepareData()
-      this.setColors()
-
-      // reset the slider to the last time slot
-      const last = this.allTimes[this.allTimes.length - 1]
-      this.currentTime = [last, last]
+      // reload data while keeping the currently selected time slot
+      await this.reloadDataAndPreserveSelectedTime()
     },
 
     setColors() {
@@ -1299,7 +1354,8 @@ const GridMap = defineComponent({
 
       if (this.config.colorRamp) {
         if (this.config.colorRamp.ramp != undefined)
-          this.guiConfig['color ramp'] = this.config.colorRamp.ramp
+          this.guiConfig['color ramp'] =
+            this.config.colorRamp.ramp === 'RdBu' ? 'RdBu (div)' : this.config.colorRamp.ramp
 
         if (this.config.colorRamp.reverse != undefined)
           this.guiConfig.flip = this.config.colorRamp.reverse
