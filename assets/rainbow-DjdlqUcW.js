@@ -1,0 +1,1 @@
+import{M as e,P as t,a as n,t as r}from"./src-DVwDHCWj.js";e(),r();var i=n(t(-100,.75,.35),t(80,1.5,.8)),a=n(t(260,.75,.35),t(80,1.5,.8)),o=t();function s(e){(e<0||e>1)&&(e-=Math.floor(e));var t=Math.abs(e-.5);return o.h=360*e-100,o.s=1.5-1.5*t,o.l=.8-.9*t,o+``}export{s as n,i as r,a as t};

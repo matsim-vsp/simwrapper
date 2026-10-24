@@ -1,0 +1,1 @@
+function e(e){return new Worker(`/simwrapper/assets/NewXmlFetcher.worker-BZXHhRR_.js`,{name:e?.name})}export{e as t};

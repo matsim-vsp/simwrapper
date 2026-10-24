@@ -1,0 +1,55 @@
+# Zone system configurations for matrix plugin
+#
+# Only GeoJSON files are supported. Shapefiles are too slow and often have coordinate problems.
+# Use GeoJSON and pre-convert all coordinates to long/lat (WGS84 or EPSG:4326)
+#
+# URL:
+# ------
+# - `/zones/filename.geojson` if you place the file in the /zones folder of the SimWrapper build
+# - full HTTP urls if the remote server allows external access
+#
+# LOOKUP:
+# -------
+# 'lookup' is name of the property/column containing the zone ID / TAZ number
+#
+# SIZES:
+# ------
+# 'sizes' tells SimWrapper which zone systems are appropriate for which matrix sizes.
+
+MTC-1454:
+  url: https://svn.vsp.tu-berlin.de/repos/public-svn/shared/simwrapper/zone-systems/mtc1454.geojson.gz
+  lookup: TAZ1454
+  sizes: 190,1454,1475
+
+MTC-4756:
+  url: https://svn.vsp.tu-berlin.de/repos/public-svn/shared/simwrapper/zone-systems/mtc-taz4756.geojson.gz
+  lookup: taz
+  sizes: 4756
+
+MTC-MAZ:
+  url: https://svn.vsp.tu-berlin.de/repos/public-svn/shared/simwrapper/zone-systems/mtc-maz39726.geojson.gz
+  lookup: maz
+  sizes: 39726
+
+PSRC-3870:
+  url: https://svn.vsp.tu-berlin.de/repos/public-svn/shared/simwrapper/zone-systems/psrc-taz2010-3870.geojson.gz
+  lookup: TAZ
+  sizes: 3700,3870
+
+# keep this one local due to firewall
+SANDAG-4947:
+  url: /zones/sandag.geojson.gz
+  lookup: TAZ
+  sizes: 4947
+
+SEMCOG-2899:
+  url: https://svn.vsp.tu-berlin.de/repos/public-svn/shared/simwrapper/zone-systems/SEMCOG_TAZ.geojson.gz
+  # url: /zones/SEMCOG_TAZ.geojson
+  lookup: ID
+  sizes: 2899
+  rowlookup: ZoneID
+
+SF-2454:
+  url: https://svn.vsp.tu-berlin.de/repos/public-svn/shared/simwrapper/zone-systems/sfcta-dist15.geojson.gz
+  lookup: TAZ
+  sizes: 981,2454,2475,3681,3717

@@ -1,0 +1,1 @@
+var e=class{internalState={message:``,sections:[]};get state(){return this.internalState}clear(e){e?this.internalState.sections=this.internalState.sections.filter(t=>t.section!==e):this.internalState.sections=[]}setLegendSection(e){this.clear(e.section),this.internalState.sections.unshift(e),this.internalState.sections.sort((e,t)=>e.section<t.section?-1:1)}};export{e as t};
